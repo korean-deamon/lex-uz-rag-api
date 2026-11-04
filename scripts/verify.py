@@ -80,6 +80,18 @@ def step_environment(report: Report) -> str:
         details.append("fix: pip install -r requirements.txt")
         return report.add("Environment", FAIL, details)
     details.append("all required packages importable")
+
+    # A missing .env is the most common first-run mistake. The code default is
+    # RAG_LLM_BACKEND=anthropic -- deliberately, so a misconfigured provider
+    # fails loudly instead of silently serving the offline answerer's extractive
+    # quotes as if a model had written them. But that means a forgotten .env
+    # surfaces later as a confusing generation failure, so name it here instead.
+    if not (ROOT / ".env").exists():
+        details.append("no .env file -- run: cp .env.example .env")
+        details.append("without it the provider defaults to anthropic, and the")
+        details.append("Generation step below will FAIL for lack of a key")
+        return report.add("Environment", WARN, details)
+
     return report.add("Environment", PASS, details)
 
 
