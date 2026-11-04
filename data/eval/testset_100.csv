@@ -1,0 +1,101 @@
+id,batch,category,question,language,expected_answer,expected_doc_id,expected_article,answerable
+q001,b01,amaldagi_tahrir,Hozirda amalda boʻlgan Mehnat kodeksi qachon qabul qilingan va undan oldingi kodeks oʻrniga kelganmi?,uz-Latn,,lex:6257288,,true
+q002,b01,faktik,Bojxona kodeksiga koʻra bojxona deklaratsiyasi qanday toʻldiriladi?,uz-Latn,,lex:2876354,,true
+q003,b01,faktik,Jinoyat-protsessual kodeksiga koʻra kim ayblanuvchi deb hisoblanadi?,uz-Latn,,lex:111460,,true
+q004,b01,faktik,Shaharsozlik kodeksiga koʻra qurilish ruxsatnomasi qanday olinadi?,uz-Latn,,lex:5307951,,true
+q005,b01,faktik,Jinoyat-protsessual kodeksiga koʻra ishni koʻrib chiqish qaysi sudda amalga oshiriladi?,uz-Latn,,lex:111460,,true
+q006,b01,javobsiz,Yevropa Ittifoqi direktivasiga koʻra shaxsiy maʼlumotlarni himoya qilish tartibi qanday?,uz-Latn,,,,false
+q007,b01,kirill_rus,Жиноят кодексига кўра ўғрилик учун қанday жавобгарлик белгиланган?,uz-Cyrl,,lex:111453,,true
+q008,b01,koʻp_modda,Yer kodeksiga koʻra yer uchastkasini doimiy va muddatli egalik qilish huquqlari qanday farqlanadi?,uz-Latn,,lex:152653,,true
+q009,b01,noaniq,ishdan boʻshatishsa nima qilish kerak,uz-Latn,,lex:6257288,,true
+q010,b01,raqamlar,Mehnat kodeksiga koʻra yillik asosiy mehnat taʼtilining eng kam davomiyligi necha kun?,uz-Latn,,lex:6257288,,true
+q011,b02,amaldagi_tahrir,Amaldagi tahrirdagi Konstitutsiyaga koʻra Prezident vakolat muddati necha yil?,uz-Latn,,lex:6445145,,true
+q012,b02,faktik,Budjet kodeksiga koʻra davlat budjeti qanday shakllantiriladi?,uz-Latn,,lex:2304138,,true
+q013,b02,faktik,Oʻzbekiston Respublikasi Konstitutsiyasiga koʻra davlat tili qaysi til?,uz-Latn,,lex:6445145,,true
+q014,b02,faktik,Soliq kodeksiga koʻra soliq toʻlovchi kim deb hisoblanadi?,uz-Latn,,lex:4674902,,true
+q015,b02,faktik,Konstitutsiyaga koʻra Oʻzbekiston Respublikasining poytaxti qaysi shahar?,uz-Latn,,lex:6445145,,true
+q016,b02,javobsiz,Oʻzbekiston Respublikasi Konstitutsiyasining 300-moddasida nima deyilgan?,uz-Latn,,,,false
+q017,b02,kirill_rus,Меҳнат кодексига кўра иш вақтининг нормал давомийлиги қанча?,uz-Cyrl,,lex:6257288,,true
+q018,b02,koʻp_modda,Maʼmuriy javobgarlik toʻgʻrisidagi kodeksga koʻra maʼmuriy jazo turlari va ularni qoʻllash tartibi qanday?,uz-Latn,,lex:97664,,true
+q019,b02,noaniq,ajrashish haqida gapirib bering,uz-Latn,,lex:104720,,true
+q020,b02,raqamlar,Oila kodeksiga koʻra nikoh yoshi nechada belgilangan?,uz-Latn,,lex:104720,,true
+q021,b03,amaldagi_tahrir,Amaldagi Soliq kodeksiga koʻra aylanmadan olinadigan soliq toʻlovchilari kimlar?,uz-Latn,,lex:4674902,,true
+q022,b03,faktik,Fuqarolik kodeksiga koʻra yuridik shaxs qanday tashkil etiladi?,uz-Latn,,lex:111189,,true
+q023,b03,faktik,Maʼmuriy javobgarlik toʻgʻrisidagi kodeksga koʻra maʼmuriy huquqbuzarlik nima?,uz-Latn,,lex:97664,,true
+q024,b03,faktik,Suv kodeksiga koʻra suv resurslaridan foydalanish qanday tartibga solinadi?,uz-Latn,,lex:7655343,,true
+q025,b03,faktik,Maʼmuriy javobgarlik kodeksiga koʻra jarima qanday toʻlanadi?,uz-Latn,,lex:97664,,true
+q026,b03,javobsiz,Mehnat kodeksiga koʻra kosmonavtlarning ish vaqti qanday hisoblanadi?,uz-Latn,,,,false
+q027,b03,kirill_rus,Конституцияга кўра Ўзбекистон Республикасининг пойтахти қайси шаҳар?,uz-Cyrl,,lex:6445145,,true
+q028,b03,koʻp_modda,Jinoyat-protsessual kodeksiga koʻra guvoh va jabrlanuvchining huquqlari qanday farqlanadi?,uz-Latn,,lex:111460,,true
+q029,b03,noaniq,soliq toʻlamasam nima boʻladi,uz-Latn,,lex:4674902,,true
+q030,b03,raqamlar,Saylov kodeksiga koʻra saylovda qatnashish huquqi necha yoshdan beriladi?,uz-Latn,,lex:4386848,,true
+q031,b04,amaldagi_tahrir,Amaldagi tahrirdagi Suv kodeksiga koʻra suvdan foydalanish huquqi qanday yuzaga keladi?,uz-Latn,,lex:7655343,,true
+q032,b04,faktik,Fuqarolik kodeksining ikkinchi qismiga koʻra meros qanday tartibda olinadi?,uz-Latn,,lex:180552,,true
+q033,b04,faktik,Maʼmuriy sud ishlarini yuritish kodeksiga koʻra maʼmuriy da'vo qanday qoʻyiladi?,uz-Latn,,lex:3527353,,true
+q034,b04,faktik,Tadbirkorlik faoliyati toʻgʻrisidagi qonunga koʻra tadbirkor kim deb hisoblanadi?,uz-Latn,,lex:2006789,,true
+q035,b04,faktik,Maʼmuriy sud ishlarini yuritish kodeksiga koʻra davlat organi qarori qanday shikoyat qilinadi?,uz-Latn,,lex:3527353,,true
+q036,b04,javobsiz,Soliq kodeksiga koʻra 2050 yilda QQS stavkasi qancha boʻladi?,uz-Latn,,,,false
+q037,b04,kirill_rus,Солиқ кодексига кўра жисмоний шахслардан олинадиган даромад солиғи ставкаси қанча?,uz-Cyrl,,lex:4674902,,true
+q038,b04,koʻp_modda,Konstitutsiyaga koʻra Oliy Majlis Qonunchilik palatasi va Senatning vakolatlari qanday taqsimlangan?,uz-Latn,,lex:6445145,,true
+q039,b04,noaniq,pul qarz berganimni qaytarmasa-chi,uz-Latn,,lex:111189,,true
+q040,b04,raqamlar,Soliq kodeksiga koʻra QQS stavkasi necha foiz?,uz-Latn,,lex:4674902,,true
+q041,b05,amaldagi_tahrir,Amaldagi Yer kodeksiga koʻra yer uchastkasini xususiy mulk qilib berish mumkinmi?,uz-Latn,,lex:152653,,true
+q042,b05,faktik,Fuqarolik protsessual kodeksiga koʻra da'vo arizasi qanday beriladi?,uz-Latn,,lex:3517337,,true
+q043,b05,faktik,Markaziy bank toʻgʻrisidagi qonunga koʻra Markaziy bankning asosiy vazifasi nima?,uz-Latn,,lex:72266,,true
+q044,b05,faktik,Yer kodeksiga koʻra yer uchastkalari qanday turlarga boʻlinadi?,uz-Latn,,lex:152653,,true
+q045,b05,faktik,Markaziy bank toʻgʻrisidagi qonunga koʻra pul-kredit siyosati kim tomonidan belgilanadi?,uz-Latn,,lex:72266,,true
+q046,b05,javobsiz,Oila kodeksiga koʻra uy hayvonini farzandlikka olish tartibi qanday?,uz-Latn,,,,false
+q047,b05,kirill_rus,Оила кодексига кўра никоҳ тузиш учун қандай шартлар талаб қилинади?,uz-Cyrl,,lex:104720,,true
+q048,b05,koʻp_modda,Budjet kodeksiga koʻra davlat budjeti daromadlari va xarajatlari qanday tarkibdan iborat?,uz-Latn,,lex:2304138,,true
+q049,b05,noaniq,yer olish uchun nima qilaman,uz-Latn,,lex:152653,,true
+q050,b05,raqamlar,Fuqarolik kodeksiga koʻra talab qilish muddati (da'vo muddati) necha yil?,uz-Latn,,lex:111189,,true
+q051,b06,amaldagi_tahrir,Amaldagi “Raqobat toʻgʻrisida”gi Qonunga koʻra ustun mavqe qanday aniqlanadi?,uz-Latn,,lex:6518381,,true
+q052,b06,faktik,Havo kodeksiga koʻra havo kemasi egasining javobgarligi qanday belgilangan?,uz-Latn,,lex:55594,,true
+q053,b06,faktik,Mehnat kodeksiga koʻra mehnat shartnomasini bekor qilish asoslari qanday?,uz-Latn,,lex:6257288,,true
+q054,b06,faktik,Bojxona kodeksiga koʻra bojxona toʻlovlari qanday turlarga boʻlinadi?,uz-Latn,,lex:2876354,,true
+q055,b06,javobsiz,Marsda yer uchastkasini qanday roʻyxatdan oʻtkazish kerak?,uz-Latn,,,,false
+q056,b06,kirill_rus,Какова минимальная продолжительность ежегодного основного трудового отпуска по Трудовому кодексу?,ru,,lex:6257288,,true
+q057,b06,koʻp_modda,Jinoyat kodeksiga koʻra qasddan odam oʻldirish va ehtiyotsizlik oqibatida odam oʻlimiga sabab boʻlish uchun javobgarlik qanday farqlanadi?,uz-Latn,,lex:111453,,true
+q058,b06,koʻp_modda,Fuqarolik protsessual kodeksiga koʻra apellyatsiya va kassatsiya tartibida shikoyat qilish qanday farqlanadi?,uz-Latn,,lex:3517337,,true
+q059,b06,raqamlar,Fuqarolik kodeksiga koʻra fuqaro necha yoshdan toʻliq muomala layoqatiga ega boʻladi?,uz-Latn,,lex:111189,,true
+q060,b06,raqamlar,Jinoyat kodeksiga koʻra jinoyat javobgarligi necha yoshdan boshlanadi?,uz-Latn,,lex:111453,,true
+q061,b07,amaldagi_tahrir,Amaldagi Qonunga koʻra Markaziy bankning asosiy maqsadi nima?,uz-Latn,,lex:72266,,true
+q062,b07,faktik,Investitsiya faoliyati toʻgʻrisidagi qonunga koʻra xorijiy investorlarning huquqlari qanday kafolatlanadi?,uz-Latn,,lex:4664142,,true
+q063,b07,faktik,Oila kodeksiga koʻra nikoh qanday rasmiylashtiriladi?,uz-Latn,,lex:104720,,true
+q064,b07,faktik,Budjet kodeksiga koʻra mahalliy budjetlar kim tomonidan tasdiqlanadi?,uz-Latn,,lex:2304138,,true
+q065,b07,javobsiz,Oʻzbekistonda kriptovalyuta mayningi uchun litsenziya Jinoyat kodeksining qaysi moddasida belgilangan?,uz-Latn,,,,false
+q066,b07,kirill_rus,Какой общий срок исковой давности установлен Гражданским кодексом Узбекистана?,ru,,lex:111189,,true
+q067,b07,koʻp_modda,Mehnat kodeksiga koʻra mehnat shartnomasini xodim va ish beruvchi tashabbusi bilan bekor qilish tartibi qanday farqlanadi?,uz-Latn,,lex:6257288,,true
+q068,b07,koʻp_modda,Saylov kodeksiga koʻra Prezident va Oliy Majlis deputatlari saylovida nomzodlarga qoʻyiladigan talablar qanday farqlanadi?,uz-Latn,,lex:4386848,,true
+q069,b07,raqamlar,Fuqarolik protsessual kodeksiga koʻra apellyatsiya shikoyati qancha muddatda berilishi kerak?,uz-Latn,,lex:3517337,,true
+q070,b07,raqamlar,Jinoyat-protsessual kodeksiga koʻra tergov qanday muddatlarda olib boriladi?,uz-Latn,,lex:111460,,true
+q071,b08,amaldagi_tahrir,Amaldagi Shaharsozlik kodeksiga koʻra shaharsozlik hujjatlari qanday turlarga boʻlinadi?,uz-Latn,,lex:5307951,,true
+q072,b08,faktik,Iqtisodiy protsessual kodeksiga koʻra iqtisodiy sud ishlarni qanday koʻrib chiqadi?,uz-Latn,,lex:3523891,,true
+q073,b08,faktik,Qimmatli qogʻozlar bozori toʻgʻrisidagi qonunga koʻra aksiya nima?,uz-Latn,,lex:1374865,,true
+q074,b08,faktik,Fuqarolik kodeksiga koʻra shartnoma qanday tuzilishi mumkin?,uz-Latn,,lex:111189,,true
+q075,b08,javobsiz,Qozogʻiston Respublikasi Mehnat kodeksiga koʻra taʼtil muddati qancha?,uz-Latn,,,,false
+q076,b08,kirill_rus,Какая ставка налога на добавленную стоимость установлена Налоговым кодексом?,ru,,lex:4674902,,true
+q077,b08,koʻp_modda,Soliq kodeksiga koʻra soliq toʻlovchining huquqlari va majburiyatlari nimalardan iborat?,uz-Latn,,lex:4674902,,true
+q078,b08,koʻp_modda,Bojxona kodeksiga koʻra tovarlarni vaqtincha olib kirish va erkin muomala uchun chiqarish rejimlari qanday farqlanadi?,uz-Latn,,lex:2876354,,true
+q079,b08,raqamlar,Jinoyat kodeksiga koʻra qasddan odam oʻldirish uchun qancha jazo belgilangan?,uz-Latn,,lex:111453,,true
+q080,b08,raqamlar,Konstitutsiyaga koʻra Oliy Majlis necha palatadan iborat?,uz-Latn,,lex:6445145,,true
+q081,b09,amaldagi_tahrir,Amaldagi Oila kodeksiga koʻra nikoh yoshi oʻzgartirilganmi va hozir necha yosh?,uz-Latn,,lex:104720,,true
+q082,b09,faktik,Jinoyat-ijroiya kodeksiga koʻra ozodlikdan mahrum qilish jazosini oʻtash tartibi qanday?,uz-Latn,,lex:163629,,true
+q083,b09,faktik,Raqobat toʻgʻrisidagi qonunga koʻra monopoliyaga yoʻl qoʻyilmaydimi?,uz-Latn,,lex:6518381,,true
+q084,b09,faktik,Fuqarolik kodeksiga koʻra ijara shartnomasi nima?,uz-Latn,,lex:180552,,true
+q085,b09,javobsiz,Toshkentdagi eng yaxshi advokat kim?,uz-Latn,,,,false
+q086,b09,kirill_rus,Какой язык является государственным согласно Конституции Республики Узбекистан?,ru,,lex:6445145,,true
+q087,b09,koʻp_modda,Oila kodeksiga koʻra nikohni bekor qilish va nikohni haqiqiy emas deb topish oʻrtasida qanday farq bor?,uz-Latn,,lex:104720,,true
+q088,b09,koʻp_modda,Mehnat kodeksiga koʻra har yilgi asosiy va qoʻshimcha taʼtillar qanday asoslarda beriladi?,uz-Latn,,lex:6257288,,true
+q089,b09,raqamlar,Jinoyat-protsessual kodeksiga koʻra qamoqqa olish muddati necha kun?,uz-Latn,,lex:111460,,true
+q090,b09,raqamlar,Mehnat kodeksiga koʻra ish vaqtining haftalik normal davomiyligi necha soat?,uz-Latn,,lex:6257288,,true
+q091,b10,amaldagi_tahrir,Amaldagi Jinoyat kodeksiga koʻra oʻlim jazosi saqlanganmi?,uz-Latn,,lex:111453,,true
+q092,b10,faktik,Jinoyat kodeksiga koʻra oʻgʻrilik (oʻzlashtirish) uchun qanday javobgarlik bor?,uz-Latn,,lex:111453,,true
+q093,b10,faktik,Saylov kodeksiga koʻra saylov kampaniyasi qanday tashkil etiladi?,uz-Latn,,lex:4386848,,true
+q094,b10,faktik,Jinoyat kodeksiga koʻra poraxoʻrlik uchun qanday jazo nazarda tutilgan?,uz-Latn,,lex:111453,,true
+q095,b10,javobsiz,Oʻzbekiston Fuqarolik kodeksiga koʻra sunʼiy intellekt yaratgan asarning muallifi kim hisoblanadi?,uz-Latn,,,,false
+q096,b10,kirill_rus,С какого возраста допускается заключение брака по Семейному кодексу?,ru,,lex:104720,,true
+q097,b10,koʻp_modda,Fuqarolik kodeksiga koʻra bitimning haqiqiy emasligi va bitimni bekor qilish qanday tartibda belgilanadi?,uz-Latn,,lex:111189,,true
+q098,b10,koʻp_modda,"Jinoyat kodeksiga koʻra oʻgʻrilik, talonchilik va bosqinchilik bir-biridan nimasi bilan farq qiladi?",uz-Latn,,lex:111453,,true
+q099,b10,raqamlar,Konstitutsiyaga koʻra davlat hokimiyati necha organga boʻlinadi?,uz-Latn,,lex:6445145,,true
+q100,b10,raqamlar,Oila kodeksiga koʻra bir necha marta nikohdan oʻtish mumkinmi?,uz-Latn,,lex:104720,,true

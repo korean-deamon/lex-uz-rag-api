@@ -1,0 +1,12 @@
+requests
+beautifulsoup4
+qdrant-client
+anthropic
+sentence-transformers
+fastapi
+uvicorn[standard]
+python-dotenv
+playwright
+# /v1 API: the eval runner is an HTTP client, and the contract tests need pytest
+httpx
+pytest
