@@ -1,8 +1,14 @@
 """
-FastAPI app: the /v1 RAG API from the test specification, plus the existing
-chat UI endpoint.
+FastAPI app: the /v1 RAG API from the test specification.
 
 Run with: uvicorn backend.main:app --port 8000
+
+There used to be a second endpoint here, POST /api/chat, behind a small browser
+chat UI, running an earlier single-question pipeline of its own. Both are gone.
+It answered the same questions through different retrieval code, so the same
+question could come back two different ways depending on which door it entered
+by -- confusing to demonstrate and misleading to evaluate. The specification's
+work is /v1, and /v1 is now the only way in.
 """
 import logging
 from contextlib import asynccontextmanager
@@ -11,18 +17,14 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from backend import api_v1, config, rag, retrieval, schemas, store
+from backend import api_v1, config, retrieval, schemas, store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("rag")
 
 ROOT = Path(__file__).resolve().parent.parent
-FRONTEND_DIR = ROOT / "frontend"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -93,26 +95,21 @@ def _http_error(request: Request, exc: StarletteHTTPException) -> schemas.Utf8JS
     return schemas.Utf8JSONResponse(status_code=exc.status_code, content=body, headers=exc.headers)
 
 
-# --------------------------------------------------------------------------
-# Existing chat UI (unchanged contract: {answer, sources})
-# --------------------------------------------------------------------------
-class ChatRequest(BaseModel):
-    message: str
-
-
-@app.post("/api/chat")
-def chat(req: ChatRequest):
-    return rag.answer(req.message)
-
-
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
-
-
-app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
-
-
 @app.get("/")
 def index():
-    return FileResponse(FRONTEND_DIR / "index.html")
+    """A pointer, not a UI. The batch API returns JSON; there is no page to
+    render it, so say where the endpoints are instead of 404-ing."""
+    return {
+        "service": "lex.uz RAG API",
+        "version": config.PIPELINE_VERSION,
+        "endpoints": {
+            "batch": "POST /v1/rag/batch",
+            "batch_result": "GET /v1/rag/batch/{batch_id}",
+            "single_question": "POST /v1/rag/query",
+            "meta": "GET /v1/meta",
+            "health": "GET /v1/health",
+            "openapi": "GET /docs",
+        },
+        "auth": "Authorization: Bearer <API_KEY>",
+        "docs": "see README.md and TESTING.md",
+    }

@@ -36,8 +36,7 @@ from functools import lru_cache
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
-from backend import config, corpus_meta, lang
-from ingest.ingest import embed_model
+from backend import config, corpus_meta, embedding, lang
 
 # --- fusion weights --------------------------------------------------------
 # Rank-only fusion (RRF) was tried first and is wrong for this corpus: e5
@@ -473,9 +472,7 @@ class Context:
 
 
 def embed_query(text: str) -> list[float]:
-    # e5 expects "query: " on searches and "passage: " on indexed text.
-    vec = embed_model().encode([f"query: {lang.normalise(text)}"], normalize_embeddings=True)[0]
-    return vec.tolist()
+    return embedding.embed_query(lang.normalise(text))
 
 
 def _dense_search(vec: list[float], limit: int, codes: list[str] | None) -> list[tuple[str, float]]:

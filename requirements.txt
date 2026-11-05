@@ -1,12 +1,27 @@
-requests
-beautifulsoup4
-qdrant-client
-anthropic
-sentence-transformers
+# Everything the /v1 API, the tests and the evaluation harness need.
+#
+# On a CPU-only machine install torch first, or pip pulls several GB of CUDA
+# packages that will never be used:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+# API
 fastapi
 uvicorn[standard]
 python-dotenv
-playwright
-# /v1 API: the eval runner is an HTTP client, and the contract tests need pytest
+
+# retrieval: local embedding model (no API key, runs on CPU) + vector store
+sentence-transformers
+qdrant-client
+
+# generation: Claude via its SDK; every other provider is reached over plain
+# HTTP with httpx, which is also the eval runner's client
+anthropic
 httpx
+
+# tests
 pytest
+
+# The lex.uz scraper and its daily Airflow job need playwright, requests and
+# beautifulsoup4 -- see requirements-scraper.txt. They are deliberately not here:
+# playwright also downloads a ~400 MB browser, and nothing in the API, the tests
+# or the evaluation touches it.

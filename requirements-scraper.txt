@@ -1,0 +1,17 @@
+# Only for scraper/scraper.py and the daily Airflow job in airflow/dags/.
+#
+# Not needed to run the API, the tests, or the evaluation: the index is built
+# from the committed corpus under data/corpus/, not by scraping.
+#
+#   pip install -r requirements-scraper.txt
+#   python -m playwright install chromium     # one-time, ~400 MB
+#
+# lex.uz renders document text with JavaScript, so requests + BeautifulSoup see
+# an empty page; playwright drives a real headless browser to read the rendered
+# document.
+
+-r requirements.txt
+
+playwright
+requests
+beautifulsoup4

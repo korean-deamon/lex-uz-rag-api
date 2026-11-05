@@ -459,8 +459,8 @@ backend/
   lang.py         uz-Latn / uz-Cyrl / ru detection, apostrophe normalisation
   store.py        SQLite batch store: idempotency, 409, async state, retention
   config.py       one place for every version string, limit and provider setting
-  main.py         app wiring, error envelopes, the existing chat UI
-  rag.py          the older single-question pipeline behind /api/chat
+  main.py         app wiring, error envelopes
+  embedding.py    the shared embedding model (indexing and querying must match)
 scripts/
   build_testset.py  assemble the 100-question test set in the spec's CSV format
   run_eval.py       send the 10 batches sequentially, save each response
@@ -474,6 +474,15 @@ ingest/
   ingest.py         older raw-scrape pipeline (not served by /v1)
 ```
 
-The chat UI from the earlier stage still works at `/` on `/api/chat`, using the
-older `backend/rag.py` pipeline. It is untouched by this work and still uses
-`ANTHROPIC_API_KEY` directly, so it is subject to limitation 1 as well.
+Removed along the way, and worth knowing if you saw an earlier version: a
+browser chat UI (`frontend/`) and the single-question pipeline behind it
+(`backend/rag.py`, `POST /api/chat`). It answered the same questions through
+different retrieval code, so one question could come back two different ways
+depending on which endpoint it entered by -- confusing to demonstrate and
+misleading to evaluate. `/v1` is now the only way in, and `GET /` returns a
+list of the endpoints.
+
+The lex.uz scraper (`scraper/`) and its daily Airflow job (`airflow/`) are kept
+but unused by `/v1`, which serves the committed corpus instead (limitation 8).
+Their dependencies live in `requirements-scraper.txt` so the API, the tests and
+the evaluation do not drag in playwright and a 400 MB browser.

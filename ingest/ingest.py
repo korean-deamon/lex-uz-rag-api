@@ -19,9 +19,10 @@ import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
+
+from backend import embedding
 
 load_dotenv()
 
@@ -32,26 +33,17 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION = os.getenv("QDRANT_COLLECTION", "lex_uz")
 
-# multilingual-e5-base: much stronger retrieval quality than MiniLM for this kind of
-# dense legal text where many articles use similar vocabulary -- MiniLM scored every
-# candidate ~0.69-0.71 with no real separation and missed the right article outright.
-# e5 models are trained specifically for retrieval and expect "query: "/"passage: "
-# prefixes on the text being embedded (see embed_texts / embed_query in rag.py).
-EMBED_MODEL_NAME = "intfloat/multilingual-e5-base"
-EMBED_DIM = 768
+# The model itself lives in backend/embedding.py, shared with retrieval: both
+# sides must use the same model and prefixes or the vectors are not comparable.
+EMBED_MODEL_NAME = embedding.MODEL_NAME
+EMBED_DIM = embedding.DIM
 
 CHUNK_SIZE = 1200       # characters per chunk
 CHUNK_OVERLAP = 200     # characters of overlap between consecutive chunks
 
-_model = None
 _qdrant_client = None
 
-
-def embed_model() -> SentenceTransformer:
-    global _model
-    if _model is None:
-        _model = SentenceTransformer(EMBED_MODEL_NAME)
-    return _model
+embed_model = embedding.embed_model
 
 
 def qdrant_client() -> QdrantClient:
@@ -86,10 +78,7 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
-    # e5 models need a "passage: " prefix on indexed text (vs "query: " for searches)
-    prefixed = [f"passage: {t}" for t in texts]
-    vectors = embed_model().encode(prefixed, normalize_embeddings=True)
-    return [v.tolist() for v in vectors]
+    return embedding.embed_passages(texts)
 
 
 def upsert_doc(doc: dict):
