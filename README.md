@@ -170,7 +170,7 @@ section-7 checklist (the test suite), and the configured provider — then print
 one verdict. A `FAIL` names the fix. `READY EXCEPT GENERATION` means everything
 but the model credential is in place.
 
-Last full run: **6 passed, 1 warning, 0 failed, 1 skipped** — the warning is
+Last full run: **6 passed, 0 failed, 0 skipped** — the warning is
 `no_answer_accuracy` and the skip is generation, both from limitation 1 below.
 
 ### Check it came up
@@ -295,7 +295,7 @@ one run.
 ## How the spec checklist (section 7) is met
 
 Every line is covered by a test in `tests/test_api_v1.py`. Run them with
-`pytest tests/ -q` — 46 pass, 1 is skipped unless a working provider key is set.
+`pytest tests/ -q` — 77 pass, 1 is skipped unless a working provider key is set.
 
 | Checklist line | How | Test |
 |---|---|---|

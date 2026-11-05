@@ -128,7 +128,7 @@ python scripts/verify.py --quick
 
 This is the fastest way to know whether anything is wrong. It checks, in order:
 the environment, Qdrant, the article index, retrieval against five
-hand-verified questions in three languages, the full spec checklist (46 tests),
+hand-verified questions in three languages, the full spec checklist (77 tests),
 and the configured LLM provider — then prints one verdict.
 
 **Expected output right now** (with no provider key):
@@ -138,7 +138,7 @@ and the configured LLM provider — then prints one verdict.
 [PASS] Qdrant                     collection 'lex_uz': 7443 points
 [PASS] Article index              7383 articles loaded
 [PASS] Retrieval (3 languages)    5/5 at rank 1, 5/5 in top-5
-[PASS] Spec section 7 checklist   46 passed, 1 skipped
+[PASS] Spec section 7 checklist   77 passed, 1 skipped
 [SKIP] Generation                 RAG_LLM_BACKEND=offline
 
 5 passed, 0 warning(s), 0 failed, 1 skipped
@@ -189,6 +189,56 @@ The API key for all requests below is `test-key-lex-2026` (set in `.env` as
 `RAG_API_KEYS`). Change it there if you want to test with a different one.
 
 ---
+
+## 4b. Three things that surprise people first
+
+These are correct behaviour, not defects, and they are the three most likely to
+look like a broken service.
+
+**A batch takes at most 10 questions.** Sending 20 or 30 in one request returns
+`400`, and the message says so: `items: List should have at most 10 items after
+validation, not 20`. The specification fixes this limit (section 2: *“Batch
+hajmi: items 1–10 ta. 10 dan ko'p bo'lsa 400”*). For more than ten, send several
+batches — which is exactly what the evaluation scenario does, 10 batches of 10.
+`scripts/run_eval.py` already splits and paces them for you.
+
+**A slow batch answers `202`, not `200`.** If generation runs past the 120-second
+sync deadline, the response is:
+
+```json
+{ "run_id": "...", "batch_id": "...", "status": "processing",
+  "poll": "/v1/rag/batch/..." }
+```
+
+The work is not lost and nothing failed — fetch the result from
+`GET /v1/rag/batch/{batch_id}`, which answers `202` while it runs and `200` with
+the full response when it is done. `run_eval.py` does this automatically; a hand
+written `curl` needs the one extra GET. Measured on a free Groq key: a
+10-question batch took 285s and needed polling. On a paid key the same batch
+finishes inside the deadline and returns `200` directly.
+
+**One batch per second.** A second batch sent immediately gets `429` with
+`Retry-After`. Wait a second between batches, or let `run_eval.py` pace them.
+
+### If questions come back as `LLM_ERROR`
+
+Almost always the provider's rate limit rather than anything in this project. A
+free tier is tight: Groq's allows 8,000 tokens a minute and one question costs
+about 2,500, so ten questions need roughly three minutes of quota. Retryable
+failures are retried within a 45-second budget, honouring `Retry-After`, but a
+free tier can still exhaust it.
+
+Two ways out, in order of preference:
+
+1. **Use a paid key.** Any provider. This removes the rate limiting, the 202
+   polling and the pacing delay in one step.
+2. **Pace the calls**: set `RAG_GEN_MIN_INTERVAL_S=20` in `.env` to stay inside
+   a free quota from the start instead of hitting the limit and waiting anyway.
+   This makes every 10-question batch take the async path.
+
+The error is always reported per question — the batch still returns `200` with
+`contexts` populated, so a generation failure stays distinguishable from a
+retrieval failure.
 
 ## 5. Endpoint tests
 
@@ -483,7 +533,23 @@ Everything above works without an LLM. Answer *writing* does not.
 | `gemini` | `GEMINI_API_KEY` | yes | no | Native JSON schema output; best Uzbek quality of these |
 | `groq` | `GROQ_API_KEY` | yes | **yes** | The only one that honours the spec's `seed` literally |
 | `anthropic` | `ANTHROPIC_API_KEY` | not accepted | not accepted | Needs a Console key (`sk-ant-api03-…`) |
+| `openai` | `OPENAI_API_KEY` | model-dependent | model-dependent | Rejected parameters are dropped automatically |
+| `deepseek`, `openrouter`, `together`, `mistral`, `xai`, `fireworks`, `cerebras` | that provider's key | yes | usually | Same code path as Groq |
+| `custom` | `RAG_CUSTOM_API_KEY` | — | — | Any OpenAI-compatible endpoint, incl. a local model |
 | `offline` | none | n/a | n/a | Default. Deterministic, no network, no real answers |
+
+### How far each provider has actually been verified
+
+Worth knowing before you pick one, because "supported" and "exercised" are not
+the same thing:
+
+| Provider | Verified how far |
+|---|---|
+| `groq` | End to end, 20 real questions through the HTTP endpoint |
+| `openai` and the other OpenAI-compatible presets | Same code path as Groq, plus a stand-in endpoint that rejects `max_tokens`, `temperature`, `seed` and `json_schema` in turn — the client adapted to all four and still returned a grounded answer |
+| `anthropic` | Request shape, structured-output parsing and token accounting checked against a stand-in `api.anthropic.com`; never run against the real service, because the key available here is rate-limited |
+| `gemini` | Key and model listing confirmed; generation not, because every model returned `503 high demand` at the time |
+| `offline` | Every contract test runs on it |
 
 Once you have a key, find out which model ids it can actually reach — model
 line-ups change, so do not trust the default — and test one real question:
@@ -607,7 +673,7 @@ python scripts/verify.py --base-url http://localhost:8000 > verify-report.txt 2>
 ```bash
 python scripts/verify.py --quick                      # is it ready?
 python scripts/verify.py --base-url http://localhost:8000   # + live server + full eval
-pytest tests/ -q                                      # the spec checklist (46 tests)
+pytest tests/ -q                                      # the spec checklist (77 tests)
 uvicorn backend.main:app --port 8000                  # run the server
 python ingest/ingest_corpus.py                        # build/repair the index
 python scripts/build_testset.py                       # regenerate the test set
