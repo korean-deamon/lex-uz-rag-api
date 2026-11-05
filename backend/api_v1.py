@@ -92,6 +92,20 @@ def _compute_batch(req: schemas.BatchRequest) -> dict:
     }
 
 
+def _failed_response(stored: dict) -> schemas.Utf8JSONResponse:
+    """A whole-batch failure, answered as 503.
+
+    The spec's status table maps a service error to 500/503/504, and that code is
+    what tells the tester to retry (5s, 15s, 45s). Returning the stored failure
+    body with HTTP 200 instead made it look like a result: run_eval.py would save
+    a batch of zero answers and move on, so a transient fault became a hole in
+    the run. 503 because the condition is "try again", not "your request was
+    wrong"; the body still carries batch_id and the error, and GET keeps serving
+    the stored `failed` record, which section 5 explicitly provides for.
+    """
+    return schemas.Utf8JSONResponse(status_code=503, content=stored)
+
+
 def _run_and_store(req: schemas.BatchRequest) -> dict:
     """Compute a batch and persist it. Runs on a worker thread."""
     try:
@@ -148,6 +162,8 @@ def post_batch(req: schemas.BatchRequest, response: Response, api_key: str = Dep
     if outcome == store.RESERVE_EXISTING:
         # Idempotent replay: the stored result, not a recomputation.
         if row and row["response"] is not None:
+            if row["status"] == store.STATUS_FAILED:
+                return _failed_response(row["response"])
             response.headers["X-Idempotent-Replay"] = "true"
             return row["response"]
         # Reserved but still running (a retry arrived mid-flight).
@@ -163,7 +179,10 @@ def post_batch(req: schemas.BatchRequest, response: Response, api_key: str = Dep
     future = _executor.submit(_run_and_store, req)
     _inflight[req.batch_id] = future
     try:
-        return future.result(timeout=config.SYNC_DEADLINE_S)
+        result = future.result(timeout=config.SYNC_DEADLINE_S)
+        if result.get("status") == store.STATUS_FAILED:
+            return _failed_response(result)
+        return result
     except FutureTimeout:
         # Spec: past the sync deadline, hand back 202 and let the tester poll.
         # The worker keeps running and will store the result.

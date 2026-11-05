@@ -197,6 +197,73 @@ def test_question_level_error_is_isolated(client, batch_id):
     assert data["summary"]["error"] == 1
 
 
+# -- spec section 5: every listed error code must be reachable --------------
+def test_unreachable_index_reports_index_unavailable(client, monkeypatch, batch_id):
+    """Section 5 lists INDEX_UNAVAILABLE and RETRIEVAL_FAILED separately, and
+    the difference is the point: one says the vector store is down, the other
+    that this question's search failed. Reporting an unreachable Qdrant as
+    RETRIEVAL_FAILED sends the tester hunting through the question."""
+    from backend import retrieval
+    from qdrant_client.http.exceptions import ResponseHandlingException
+
+    def unreachable(*args, **kwargs):
+        raise ResponseHandlingException("[Errno 111] Connection refused")
+
+    monkeypatch.setattr(retrieval, "retrieve", unreachable)
+    result = post_batch(client, make_batch(batch_id, [("q001", UZ_LATN_Q)])).json()["results"][0]
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INDEX_UNAVAILABLE"
+    assert result["error"]["retryable"] is True
+
+
+def test_other_retrieval_failure_stays_retrieval_failed(client, monkeypatch, batch_id):
+    from backend import retrieval
+
+    def broken(*args, **kwargs):
+        raise ValueError("embedding produced the wrong shape")
+
+    monkeypatch.setattr(retrieval, "retrieve", broken)
+    result = post_batch(client, make_batch(batch_id, [("q001", UZ_LATN_Q)])).json()["results"][0]
+    assert result["error"]["code"] == "RETRIEVAL_FAILED"
+
+
+@pytest.mark.parametrize("error,expected", [
+    (ValueError("bad shape"), False),
+    (KeyError("article_id"), False),
+    (ConnectionError("connection refused"), True),
+    (RuntimeError("the request timed out"), True),
+    (RuntimeError("failed to connect to host"), True),
+])
+def test_index_unavailable_classifier(error, expected):
+    from backend import pipeline
+    assert pipeline._is_index_unavailable(error) is expected
+
+
+def test_whole_batch_failure_is_503_so_the_tester_retries(client, monkeypatch, batch_id):
+    """A service error must come back as 5xx. Returning the stored failure body
+    with HTTP 200 made it look like a result: run_eval.py would save a batch of
+    zero answers and move on, turning a transient fault into a hole in the run.
+    """
+    from backend import pipeline
+
+    def explode(*args, **kwargs):
+        raise RuntimeError("worker died")
+
+    monkeypatch.setattr(pipeline, "run_batch", explode)
+    r = client.post("/v1/rag/batch", json=make_batch(batch_id, [("q001", UZ_LATN_Q)]),
+                    headers=AUTH)
+    assert r.status_code == 503, r.text[:300]
+    body = r.json()
+    assert body["status"] == "failed"
+    assert body["batch_id"] == batch_id
+    assert body["error"]["retryable"] is True
+
+    # GET still serves the stored failed record -- section 5 provides for that.
+    got = client.get(f"/v1/rag/batch/{batch_id}", headers=AUTH)
+    assert got.status_code == 200
+    assert got.json()["status"] == "failed"
+
+
 # -- "system object: model, embedding, index version, lex.uz snapshot date" --
 def test_system_block_is_complete(client, batch_id):
     data = post_batch(client, make_batch(batch_id, [("q001", UZ_LATN_Q)])).json()

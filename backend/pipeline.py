@@ -120,6 +120,26 @@ def renumber_markers(answer: str, remap: dict[int, int]) -> str:
     return re.sub(r"\s+([.,;:])", r"\1", _MARKER.sub(sub, answer)).strip()
 
 
+def _is_index_unavailable(error: Exception) -> bool:
+    """Tell "the vector store is unreachable" from "this search failed".
+
+    qdrant-client wraps a refused connection or a timeout in
+    ResponseHandlingException; matching on the class by name avoids importing a
+    private module path, and the message check catches the same condition
+    arriving through httpx directly.
+    """
+    name = type(error).__name__
+    if name in ("ResponseHandlingException", "ConnectError", "ConnectTimeout",
+                "ReadTimeout", "ConnectionError"):
+        return True
+    text = str(error).lower()
+    return any(
+        signal in text
+        for signal in ("connection refused", "connection error", "timed out",
+                       "name or service not known", "failed to connect")
+    )
+
+
 def _generate_with_retry(
     question: str,
     answer_language: str,
@@ -217,9 +237,15 @@ def answer_question(item: dict, options: dict) -> dict:
     t_retrieval = time.perf_counter()
     try:
         contexts, debug = retrieval.retrieve(question, top_k=top_k)
-    except Exception as e:  # index down, embedding failure, ...
+    except Exception as e:
+        # The spec lists INDEX_UNAVAILABLE and RETRIEVAL_FAILED as separate
+        # codes, and the difference is the whole point of having both: one says
+        # the vector store cannot be reached at all, the other that the search
+        # failed for this question. Reporting an unreachable Qdrant as
+        # RETRIEVAL_FAILED would send the tester hunting through the question
+        # when the service is simply down.
         base["error"] = {
-            "code": "RETRIEVAL_FAILED",
+            "code": "INDEX_UNAVAILABLE" if _is_index_unavailable(e) else "RETRIEVAL_FAILED",
             "message": f"{type(e).__name__}: {e}",
             "retryable": True,
         }
