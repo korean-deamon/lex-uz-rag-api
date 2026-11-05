@@ -173,10 +173,20 @@ def step_retrieval(report: Report) -> str:
 
 
 def step_contract_tests(report: Report) -> str:
-    """The spec's section 7 checklist, as the test suite."""
+    """The spec's section 7 checklist, as the test suite.
+
+    Forced onto the offline generator. The checklist is about the HTTP contract
+    and retrieval, neither of which depends on the provider, and importing
+    backend.config above has already loaded .env -- so without this the
+    subprocess inherits whatever provider .env names. That made the suite call a
+    real model for every question: three times slower, costing money, and flaky,
+    because a free tier's rate limit turns into a failed test that says nothing
+    about the contract. Generation is checked on its own, in the next step.
+    """
+    env = {**os.environ, "RAG_LLM_BACKEND": "offline", "RAG_GEN_MIN_INTERVAL_S": "0"}
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/", "-q", "--no-header"],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT, capture_output=True, text=True, env=env,
     )
     tail = [line for line in proc.stdout.strip().splitlines() if line.strip()][-1:]
     details = tail or ["pytest produced no summary line"]
