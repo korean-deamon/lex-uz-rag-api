@@ -1,4 +1,4 @@
-# Only for scraper/scraper.py and the daily Airflow job in airflow/dags/.
+# Only for scraper/scraper.py and the daily Airflow job in orchestration/dags/.
 #
 # Not needed to run the API, the tests, or the evaluation: the index is built
 # from the committed corpus under data/corpus/, not by scraping.
@@ -15,3 +15,11 @@
 playwright
 requests
 beautifulsoup4
+
+# The daily job's scheduler. Not in requirements.txt: Airflow is a large
+# install with its own database and web server, and the API does not use it.
+#
+# Note the project folder is orchestration/, not airflow/ -- a directory named
+# airflow/ in the repo root shadows this package, so `import airflow` resolved
+# to the empty project folder and reported no version.
+apache-airflow

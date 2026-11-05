@@ -31,7 +31,17 @@ RAW_DIR = ROOT / "data" / "raw"
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
-COLLECTION = os.getenv("QDRANT_COLLECTION", "lex_uz")
+# A SEPARATE collection from the one /v1 serves.
+#
+# This pipeline splits whole lex.uz documents by character count, so its points
+# carry no `code` or `article_id` -- a citation built from one could not fill the
+# spec's mandatory `article` and `part` fields. Writing them into the main
+# collection is what produced the 60 malformed points that /v1 had to learn to
+# filter out, and the degenerate "lex:#art-" citations before that.
+#
+# Keeping them apart means the daily refresh can run as often as it likes
+# without touching the article-level index that answers questions.
+COLLECTION = os.getenv("QDRANT_RAW_COLLECTION", "lex_uz_raw")
 
 # The model itself lives in backend/embedding.py, shared with retrieval: both
 # sides must use the same model and prefixes or the vectors are not comparable.

@@ -435,8 +435,11 @@ mistaken for a working check.
 - **When was the lex.uz data taken, and how often is it refreshed?**
   Snapshot `2026-07` (`manifest.csv`), reported as `lex_snapshot_date`. It is a
   one-off import; there is no refresh job for the corpus yet. The separate
-  Airflow DAG refreshes the raw-scrape documents daily, and those are not served
-  by `/v1` (limitation 8).
+  Airflow job in `orchestration/` refreshes scraped lex.uz documents daily into
+  a **separate** Qdrant collection (`lex_uz_raw`), which `/v1` does not read, so
+  it can run as often as it likes without touching the article-level index.
+  Refreshing the corpus itself would mean re-fetching it and re-running
+  `ingest/ingest_corpus.py`.
 - **Is chunking by article or by fixed length?** By article. One chunk is one
   *modda*, which is why `citations[].article` is exact rather than inferred.
 - **Are repealed documents kept in the index, and how are they marked?** None are
@@ -470,8 +473,12 @@ scripts/
 tests/
   test_api_v1.py    the section 7 checklist, executable
 ingest/
-  ingest_corpus.py  article-level corpus -> Qdrant (what /v1 serves)
-  ingest.py         older raw-scrape pipeline (not served by /v1)
+  ingest_corpus.py  article-level corpus -> Qdrant `lex_uz` (what /v1 serves)
+  ingest.py         raw-scrape pipeline -> Qdrant `lex_uz_raw` (not served)
+scraper/
+  scraper.py        playwright scraper for lex.uz documents
+orchestration/
+  dags/             the daily scrape + refresh job (Airflow)
 ```
 
 Removed along the way, and worth knowing if you saw an earlier version: a
@@ -482,7 +489,15 @@ depending on which endpoint it entered by -- confusing to demonstrate and
 misleading to evaluate. `/v1` is now the only way in, and `GET /` returns a
 list of the endpoints.
 
-The lex.uz scraper (`scraper/`) and its daily Airflow job (`airflow/`) are kept
+The lex.uz scraper (`scraper/`) and its daily job (`orchestration/`) are kept
 but unused by `/v1`, which serves the committed corpus instead (limitation 8).
 Their dependencies live in `requirements-scraper.txt` so the API, the tests and
-the evaluation do not drag in playwright and a 400 MB browser.
+the evaluation do not drag in playwright, a 400 MB browser and Airflow.
+
+Two things about that job were wrong and are now fixed. It wrote into the same
+Qdrant collection `/v1` serves, with points carrying no `code` or `article_id` --
+which is where the 60 malformed points and the earlier `lex:#art-` citations
+came from; it now writes to `lex_uz_raw`. And the folder was called `airflow/`,
+which shadowed the real package: `import airflow` resolved to the empty project
+directory and reported no version, so the job could never have run. It is now
+`orchestration/`.

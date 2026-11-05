@@ -37,8 +37,10 @@ replace it with a newer copy — the version is pinned so your scores stay
 comparable with ours.
 
 `requirements.txt` is the API, the tests and the evaluation. You do **not** need
-`requirements-scraper.txt`: that is only for the lex.uz scraper and its Airflow
-job, which nothing in this guide uses, and it pulls in a ~400 MB browser.
+`requirements-scraper.txt`: that is only for the lex.uz scraper and its daily
+Airflow job in `orchestration/`, which nothing in this guide uses, and it pulls
+in Airflow plus a ~400 MB browser. That job writes to a separate Qdrant
+collection (`lex_uz_raw`) and cannot affect what you are testing.
 
 ---
 
