@@ -44,16 +44,36 @@ def list_gemini() -> list[str]:
     return sorted(names)
 
 
-def list_groq() -> list[str]:
-    if not config.GROQ_API_KEY:
-        raise SystemExit("GROQ_API_KEY is not set in .env")
+def list_openai_compatible(provider: str) -> list[str]:
+    preset = config.OPENAI_COMPATIBLE.get(provider)
+    if preset is None:
+        raise SystemExit(f"{provider} is not in config.OPENAI_COMPATIBLE")
+    default_url, key_var, _default_model = preset
+    import os
+    api_key = os.getenv(key_var)
+    base_url = os.getenv(f"RAG_{provider.upper()}_BASE_URL", default_url)
+    if not api_key:
+        raise SystemExit(f"{key_var} is not set in .env")
     r = httpx.get(
-        f"{config.GROQ_BASE_URL}/models",
-        headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
+        f"{base_url}/models",
+        headers={"Authorization": f"Bearer {api_key}"},
         timeout=30,
     )
     r.raise_for_status()
-    return sorted(m["id"] for m in r.json().get("data", []))
+    skip = ("embedding", "whisper", "tts", "dall-e", "moderation", "audio",
+            "transcribe", "image", "realtime", "guard", "prompt-guard")
+    return sorted(
+        m["id"] for m in r.json().get("data", [])
+        if not any(s in m["id"] for s in skip)
+    )
+
+
+def list_groq() -> list[str]:
+    return list_openai_compatible("groq")
+
+
+def list_openai() -> list[str]:
+    return list_openai_compatible("openai")
 
 
 def list_anthropic() -> list[str]:
@@ -62,7 +82,12 @@ def list_anthropic() -> list[str]:
     return [m.id for m in client.models.list()]
 
 
-LISTERS = {"gemini": list_gemini, "groq": list_groq, "anthropic": list_anthropic}
+LISTERS = {
+    "anthropic": list_anthropic,
+    "openai": list_openai,
+    "gemini": list_gemini,
+    "groq": list_groq,
+}
 
 
 def probe(provider: str, model: str | None) -> int:
@@ -75,11 +100,12 @@ def probe(provider: str, model: str | None) -> int:
     # config was imported above, so re-point the values this run needs.
     config.LLM_BACKEND = provider
     if model:
-        setattr(config, f"{provider.upper()}_MODEL", model)
+        os.environ[f"RAG_{provider.upper()}_MODEL"] = model
 
     from backend import generate, pipeline, retrieval
 
-    print(f"\nprobe: {provider} / {config.llm_model()}")
+    resolved = config.resolve()
+    print(f"\nprobe: {resolved.name} / {resolved.model or '(model not set)'}")
     contexts, _ = retrieval.retrieve(PROBE_QUESTION, top_k=5)
     print(f"  retrieved {len(contexts)} contexts, top = {contexts[0].chunk_id}")
 

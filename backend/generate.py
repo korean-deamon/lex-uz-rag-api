@@ -9,11 +9,12 @@ pipeline.py re-checks every quote against the context it claims to come from and
 drops any citation that is not verbatim, so a fabricated reference cannot reach
 the response.
 
-Four backends, selected by RAG_LLM_BACKEND. The prompt, the schema and all of
+Five backends, selected by RAG_LLM_BACKEND. The prompt, the schema and all of
 the verification are shared; only the HTTP call differs, so a provider swap
 cannot quietly change what is being measured:
 
   anthropic  Claude, official SDK, structured outputs via output_config.
+  openai     OpenAI chat completions, structured outputs via json_schema.
   gemini     Google Gemini, REST, structured outputs via responseSchema.
   groq       Groq, OpenAI-compatible REST, JSON mode + schema in the prompt.
   offline    Deterministic extractive answerer. No credential, no network. It
@@ -213,7 +214,7 @@ def _cache_key(question: str, answer_language: str, contexts: list[Context],
             "q": lang.normalise(question),
             "l": answer_language,
             "c": [c.chunk_id for c in contexts],
-            "b": config.LLM_BACKEND,
+            "b": config.llm_provider(),
             "m": config.llm_model(),
             "t": temperature,
             "s": seed,
@@ -243,20 +244,29 @@ def generate(
     if cached is not None:
         return cached
 
-    _pace()
-    backend = config.LLM_BACKEND
-    if backend == "offline":
+    provider = config.resolve()
+    _pace(provider)
+
+    if provider.kind == "offline":
         result = _generate_offline(question, answer_language, contexts)
-    elif backend == "anthropic":
-        result = _generate_anthropic(question, answer_language, contexts)
-    elif backend == "gemini":
-        result = _generate_gemini(question, answer_language, contexts, temperature)
-    elif backend == "groq":
-        result = _generate_groq(question, answer_language, contexts, temperature, seed)
+    elif provider.kind == "anthropic":
+        result = _generate_anthropic(provider, question, answer_language, contexts)
+    elif provider.kind == "gemini":
+        result = _generate_gemini(provider, question, answer_language, contexts, temperature)
+    elif provider.kind == "openai_compatible":
+        result = _generate_openai_compatible(
+            provider, question, answer_language, contexts, temperature, seed
+        )
     else:
+        known = ", ".join(
+            ["auto", "anthropic", "gemini", "custom", "offline", *config.OPENAI_COMPATIBLE]
+        )
         raise GenerationError(
             "LLM_ERROR",
-            f"Unknown RAG_LLM_BACKEND {backend!r}; expected anthropic, gemini, groq or offline",
+            f"Unknown RAG_LLM_BACKEND {provider.name!r}. Known: {known}. "
+            f"For a provider not listed, set RAG_LLM_BACKEND=custom with "
+            f"RAG_CUSTOM_BASE_URL, RAG_CUSTOM_API_KEY and RAG_CUSTOM_MODEL -- any "
+            f"OpenAI-compatible endpoint works.",
             False,
         )
 
@@ -276,8 +286,11 @@ _pace_lock = threading.Lock()
 _last_call = 0.0
 
 
-def _pace() -> None:
-    if config.GEN_MIN_INTERVAL_S <= 0:
+def _pace(provider) -> None:
+    # Only a provider reached over the network has a quota to stay under. Pacing
+    # the offline generator would delay work that makes no API call at all -- it
+    # quietly made the test suite take twenty seconds per question.
+    if config.GEN_MIN_INTERVAL_S <= 0 or provider.kind == "offline":
         return
     global _last_call
     with _pace_lock:
@@ -335,6 +348,20 @@ def _parse_answer_json(text: str, model: str, input_tokens: int,
     )
 
 
+class _SalvageableJSON(Exception):
+    """Carries a provider-rejected generation that may still parse on our side.
+
+    Groq's server-side JSON validation is stricter than json.loads -- a trailing
+    comma or a code fence is enough for it to reject the request. Rather than
+    burn a retry, the raw attempt is parsed here and only discarded if it really
+    is unusable.
+    """
+
+    def __init__(self, raw: str):
+        super().__init__("provider rejected its own JSON")
+        self.raw = raw
+
+
 def _retry_after(response: httpx.Response) -> float | None:
     raw = response.headers.get("retry-after")
     if not raw:
@@ -348,6 +375,32 @@ def _retry_after(response: httpx.Response) -> float | None:
 def _http_error(provider: str, e: httpx.HTTPStatusError) -> GenerationError:
     status = e.response.status_code
     body = e.response.text[:300]
+
+    # Groq enforces JSON mode server-side and rejects the whole request with a
+    # 400 when the model's own output does not parse ("Failed to validate
+    # JSON"). That is a sampling fluke, not a malformed request: the identical
+    # prompt succeeds on the next attempt. Classifying it with the other 400s
+    # made it permanent, so a question was scored as failed over a retryable
+    # hiccup. The model's raw attempt comes back in `failed_generation`, so try
+    # to salvage it before spending a retry.
+    # Groq words this two ways -- "Failed to validate JSON" when the output
+    # parses but breaks the schema, "Failed to generate JSON" when it does not
+    # parse at all. Matching only the first let the second fall through to the
+    # generic 400 branch, where the word "token" in the body got it labelled
+    # CONTEXT_TOO_LONG and non-retryable: a wrong code, and a question lost to a
+    # hiccup that a retry fixes.
+    if status == 400 and ("failed to validate json" in body.lower()
+                          or "failed to generate json" in body.lower()):
+        try:
+            failed = (e.response.json().get("error") or {}).get("failed_generation")
+        except (ValueError, AttributeError):
+            failed = None
+        if failed:
+            raise _SalvageableJSON(failed)
+        return GenerationError(
+            "LLM_ERROR", f"{provider} could not produce valid JSON: {body}", True
+        )
+
     if status == 429:
         return GenerationError(
             "LLM_ERROR", f"{provider} rate limited: {body}", True,
@@ -376,12 +429,18 @@ def client() -> anthropic.Anthropic:
     return _client
 
 
-def _generate_anthropic(question: str, answer_language: str,
+def _generate_anthropic(provider, question: str, answer_language: str,
                         contexts: list[Context]) -> GenerationResult:
+    if not provider.api_key:
+        raise GenerationError(
+            "LLM_ERROR",
+            f"{provider.key_var} is not set but RAG_LLM_BACKEND=anthropic",
+            False,
+        )
     prompt = build_prompt(question, answer_language, contexts)
     try:
         resp = client().messages.create(
-            model=config.ANTHROPIC_MODEL,
+            model=provider.model,
             max_tokens=config.LLM_MAX_TOKENS,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
@@ -412,7 +471,7 @@ def _generate_anthropic(question: str, answer_language: str,
     text = "".join(b.text for b in resp.content if b.type == "text")
     return _parse_answer_json(
         text,
-        resp.model or config.ANTHROPIC_MODEL,
+        resp.model or provider.model,
         resp.usage.input_tokens,
         resp.usage.output_tokens,
     )
@@ -421,14 +480,16 @@ def _generate_anthropic(question: str, answer_language: str,
 # --------------------------------------------------------------------------
 # Gemini (generativelanguage REST)
 # --------------------------------------------------------------------------
-def _generate_gemini(question: str, answer_language: str, contexts: list[Context],
-                     temperature: float | None) -> GenerationResult:
-    if not config.GEMINI_API_KEY:
+def _generate_gemini(provider, question: str, answer_language: str,
+                     contexts: list[Context], temperature: float | None) -> GenerationResult:
+    if not provider.api_key:
         raise GenerationError(
-            "LLM_ERROR", "GEMINI_API_KEY is not set but RAG_LLM_BACKEND=gemini", False
+            "LLM_ERROR",
+            f"{provider.key_var} is not set but RAG_LLM_BACKEND=gemini",
+            False,
         )
 
-    url = f"{config.GEMINI_BASE_URL}/models/{config.GEMINI_MODEL}:generateContent"
+    url = f"{provider.base_url}/models/{provider.model}:generateContent"
     body = {
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [
@@ -445,7 +506,7 @@ def _generate_gemini(question: str, answer_language: str, contexts: list[Context
         resp = httpx.post(
             url,
             json=body,
-            headers={"x-goog-api-key": config.GEMINI_API_KEY},
+            headers={"x-goog-api-key": provider.api_key},
             timeout=config.LLM_TIMEOUT_S,
         )
         resp.raise_for_status()
@@ -480,79 +541,202 @@ def _generate_gemini(question: str, answer_language: str, contexts: list[Context
     usage = data.get("usageMetadata") or {}
     return _parse_answer_json(
         text,
-        data.get("modelVersion") or config.GEMINI_MODEL,
+        data.get("modelVersion") or provider.model,
         usage.get("promptTokenCount", 0),
         usage.get("candidatesTokenCount", 0),
     )
 
 
 # --------------------------------------------------------------------------
-# Groq (OpenAI-compatible REST)
+# OpenAI-compatible chat completions (OpenAI itself, and Groq)
 # --------------------------------------------------------------------------
-def _generate_groq(question: str, answer_language: str, contexts: list[Context],
-                   temperature: float | None, seed: int | None) -> GenerationResult:
-    if not config.GROQ_API_KEY:
-        raise GenerationError(
-            "LLM_ERROR", "GROQ_API_KEY is not set but RAG_LLM_BACKEND=groq", False
-        )
+# Which optional parameters a chat-completions endpoint accepts varies by model,
+# not just by provider: OpenAI's reasoning models reject `temperature`, want
+# `max_completion_tokens` instead of `max_tokens`, and not every model supports
+# `response_format: json_schema`. Hardcoding one combination means "it works
+# with my key but not yours", so the request starts with everything useful and
+# drops or renames whatever the endpoint objects to, guided by the error it
+# returns. Each adaptation is recorded, so a run can be told apart from one that
+# needed none.
+_ADAPTATIONS: tuple[tuple[str, str], ...] = (
+    # (substring to look for in the error, what to do about it)
+    ("max_completion_tokens", "rename:max_tokens:max_completion_tokens"),
+    ("'temperature'", "drop:temperature"),
+    ("temperature", "drop:temperature"),
+    ("'seed'", "drop:seed"),
+    ("json_schema", "downgrade:response_format"),
+    ("response_format", "drop:response_format"),
+)
+_MAX_ADAPTATIONS = 4
 
-    # Groq's JSON mode guarantees valid JSON but not this shape, so the schema
-    # goes in the prompt as well. The verification in pipeline.py is what makes
-    # a wrong shape harmless -- unparseable entries are simply dropped.
+
+def _bearer(provider) -> dict[str, str]:
+    return {"Authorization": f"Bearer {provider.api_key}"}
+
+
+def _json_schema_format() -> dict:
+    """OpenAI structured outputs. Stricter than JSON mode: the shape is enforced
+    server-side, not just the syntax."""
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": "grounded_answer", "strict": True, "schema": ANSWER_SCHEMA},
+    }
+
+
+def _generate_openai_compatible(
+    provider,
+    question: str,
+    answer_language: str,
+    contexts: list[Context],
+    temperature: float | None,
+    seed: int | None,
+) -> GenerationResult:
+    if not provider.base_url:
+        raise GenerationError(
+            "LLM_ERROR",
+            "RAG_CUSTOM_BASE_URL is not set but RAG_LLM_BACKEND=custom. Point it at "
+            "any OpenAI-compatible endpoint, e.g. https://api.deepseek.com/v1",
+            False,
+        )
+    if not provider.api_key:
+        raise GenerationError(
+            "LLM_ERROR",
+            f"{provider.key_var} is not set but RAG_LLM_BACKEND={provider.name}",
+            False,
+        )
+    if not provider.model:
+        raise GenerationError(
+            "LLM_ERROR",
+            f"No model set for {provider.name}. Run "
+            f"`python scripts/list_models.py {provider.name}` and set "
+            f"RAG_{provider.name.upper()}_MODEL in .env.",
+            False,
+        )
+    name = provider.name
+
+    # The schema goes in the prompt too. Server-side JSON enforcement
+    # guarantees syntax, and sometimes shape, but never on every model -- and
+    # when it is dropped as an adaptation the prompt is all that is left.
     system = (
         SYSTEM_PROMPT
         + "\n\nReply with a single JSON object and nothing else, matching this schema:\n"
         + json.dumps(ANSWER_SCHEMA, ensure_ascii=False)
     )
     body: dict = {
-        "model": config.GROQ_MODEL,
+        "model": provider.model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": build_prompt(question, answer_language, contexts)},
         ],
         "max_tokens": config.LLM_MAX_TOKENS,
         "temperature": 0 if temperature is None else temperature,
-        "response_format": {"type": "json_object"},
+        "response_format": _json_schema_format(),
     }
-    # Groq is the one provider here that accepts a seed, so the spec's
-    # reproducibility request is honoured literally on this backend.
+    # These endpoints are the only ones here that take a seed, so the spec's
+    # reproducibility request is honoured literally when the model allows it.
     if seed is not None:
         body["seed"] = seed
 
-    try:
-        resp = httpx.post(
-            f"{config.GROQ_BASE_URL}/chat/completions",
-            json=body,
-            headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
-            timeout=config.LLM_TIMEOUT_S,
-        )
-        resp.raise_for_status()
-    except httpx.TimeoutException as e:
-        raise GenerationError(
-            "LLM_TIMEOUT", f"Groq exceeded {config.LLM_TIMEOUT_S:.0f}s", True
-        ) from e
-    except httpx.HTTPStatusError as e:
-        raise _http_error("Groq", e) from e
-    except httpx.RequestError as e:
-        raise GenerationError("LLM_ERROR", f"Could not reach Groq: {e}", True) from e
+    adaptations: list[str] = []
+    for _ in range(_MAX_ADAPTATIONS + 1):
+        try:
+            resp = httpx.post(
+                f"{provider.base_url}/chat/completions",
+                json=body,
+                headers=_bearer(provider),
+                timeout=config.LLM_TIMEOUT_S,
+            )
+            resp.raise_for_status()
+        except httpx.TimeoutException as e:
+            raise GenerationError(
+                "LLM_TIMEOUT", f"{name} exceeded {config.LLM_TIMEOUT_S:.0f}s", True
+            ) from e
+        except httpx.RequestError as e:
+            raise GenerationError("LLM_ERROR", f"Could not reach {name}: {e}", True) from e
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                change = _adapt(body, e.response.text)
+                if change:
+                    adaptations.append(change)
+                    continue
+            try:
+                raise _http_error(name, e) from e
+            except _SalvageableJSON as salvage:
+                # Our parser is more forgiving than the provider's validator; if
+                # the rejected attempt is usable, answer instead of retrying.
+                try:
+                    return _parse_answer_json(salvage.raw, provider.model, 0, 0)
+                except GenerationError:
+                    raise GenerationError(
+                        "LLM_ERROR",
+                        f"{name} rejected its own JSON and the raw output is "
+                        f"unusable either",
+                        True,
+                    ) from e
 
-    data = resp.json()
-    choices = data.get("choices") or []
-    if not choices:
-        raise GenerationError("LLM_ERROR", "Groq returned no choices", True)
-    choice = choices[0]
-    if choice.get("finish_reason") == "length":
-        raise GenerationError(
-            "CONTEXT_TOO_LONG", "Groq hit max_tokens before finishing the JSON", False
-        )
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            raise GenerationError("LLM_ERROR", f"{name} returned no choices", True)
+        choice = choices[0]
+        if choice.get("finish_reason") == "length":
+            raise GenerationError(
+                "CONTEXT_TOO_LONG",
+                f"{name} hit the output limit before finishing the JSON",
+                False,
+            )
 
-    usage = data.get("usage") or {}
-    return _parse_answer_json(
-        (choice.get("message") or {}).get("content") or "",
-        data.get("model") or config.GROQ_MODEL,
-        usage.get("prompt_tokens", 0),
-        usage.get("completion_tokens", 0),
+        usage = data.get("usage") or {}
+        result = _parse_answer_json(
+            (choice.get("message") or {}).get("content") or "",
+            data.get("model") or provider.model,
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+        )
+        if adaptations:
+            result.notes.append(
+                f"{name} rejected parameters, adapted: {', '.join(adaptations)}"
+            )
+        return result
+
+    raise GenerationError(
+        "LLM_ERROR",
+        f"{name} kept rejecting the request after {_MAX_ADAPTATIONS} adaptations "
+        f"({', '.join(adaptations)})",
+        False,
     )
+
+
+def _adapt(body: dict, error_text: str) -> str | None:
+    """Mutate `body` to satisfy an endpoint that rejected a parameter.
+
+    -> a description of what changed, or None if the error is not about a
+    parameter we can give up.
+    """
+    lowered = error_text.lower()
+    for marker, action in _ADAPTATIONS:
+        if marker.lower() not in lowered:
+            continue
+        kind, _, rest = action.partition(":")
+
+        if kind == "rename":
+            old, _, new = rest.partition(":")
+            if old in body:
+                body[new] = body.pop(old)
+                return f"{old} -> {new}"
+        elif kind == "drop":
+            if rest in body:
+                body.pop(rest)
+                return f"dropped {rest}"
+        elif kind == "downgrade":
+            # Fall back from enforced schema to plain JSON mode; the schema is
+            # still in the prompt and pipeline.py verifies the result anyway.
+            if body.get("response_format", {}).get("type") == "json_schema":
+                body["response_format"] = {"type": "json_object"}
+                return "response_format json_schema -> json_object"
+    return None
+
+
 
 
 # --------------------------------------------------------------------------

@@ -4,6 +4,8 @@ The specification's section 7 checklist, as executable tests.
 Each test names the checklist line it covers, so "is the API ready for the
 test?" is answered by running this file rather than by reading the code.
 """
+import json
+
 import pytest
 
 from backend import config
@@ -406,21 +408,164 @@ def test_system_block_names_the_provider(client):
     assert data["system"]["llm_model"]
 
 
-@pytest.mark.parametrize("provider", ["gemini", "groq"])
-def test_missing_provider_key_is_a_question_level_error(client, monkeypatch, provider):
-    """A provider selected without its key must fail the question with a clear
-    code -- not crash the batch, and not fall back to a different provider
-    silently, which would make the run's `system` block a lie."""
+@pytest.mark.parametrize(
+    "error_text,expect_change,expect_body",
+    [
+        # Exactly what OpenAI returns for a reasoning model.
+        ("Unsupported parameter: 'max_tokens' is not supported with this model. "
+         "Use 'max_completion_tokens' instead.",
+         "max_tokens -> max_completion_tokens",
+         lambda b: "max_tokens" not in b and b["max_completion_tokens"] == 2000),
+        ("Unsupported value: 'temperature' does not support 0 with this model.",
+         "dropped temperature",
+         lambda b: "temperature" not in b),
+        ("Unsupported parameter: 'seed' is not supported with this model.",
+         "dropped seed",
+         lambda b: "seed" not in b),
+        ("Invalid parameter: 'response_format' of type 'json_schema' is not supported.",
+         "response_format json_schema -> json_object",
+         lambda b: b["response_format"] == {"type": "json_object"}),
+    ],
+)
+def test_unsupported_parameters_are_adapted_away(error_text, expect_change, expect_body):
+    """Which optional parameters a chat-completions endpoint accepts varies by
+    model, so the client gives up whatever the endpoint objects to instead of
+    failing the question. Otherwise the project works with one person's key and
+    not another's."""
+    from backend import generate
+    body = {
+        "model": "m", "messages": [], "max_tokens": 2000, "temperature": 0, "seed": 42,
+        "response_format": generate._json_schema_format(),
+    }
+    change = generate._adapt(body, error_text)
+    assert change == expect_change
+    assert expect_body(body), body
+
+
+def test_unrecognised_400_is_not_adapted():
+    """An error that is not about a parameter must surface, not trigger a
+    pointless retry loop that hides the real problem."""
+    from backend import generate
+    body = {"model": "m", "messages": [], "max_tokens": 10}
+    assert generate._adapt(body, "You exceeded your current quota") is None
+    assert generate._adapt(body, "Invalid value for 'messages'") is None
+
+
+def test_adaptation_is_idempotent():
+    """A parameter already gone cannot be given up twice, or the loop would
+    spin on the same error until it ran out of attempts."""
+    from backend import generate
+    body = {"model": "m", "messages": []}
+    assert generate._adapt(body, "Unsupported parameter: 'seed'") is None
+
+
+def test_every_known_provider_resolves_to_a_handled_kind():
+    """Only three code paths exist -- the two native APIs and the OpenAI
+    chat-completions protocol. A provider that resolved to anything else would
+    reach the dispatcher's "unknown backend" branch only once someone configured
+    it, which is the worst time to find out."""
+    handled = {"anthropic", "gemini", "openai_compatible", "offline"}
+    names = ["anthropic", "gemini", "custom", "offline", *config.OPENAI_COMPATIBLE]
+    for name in names:
+        original = config.LLM_BACKEND
+        try:
+            config.LLM_BACKEND = name
+            provider = config.resolve()
+            assert provider.kind in handled, f"{name} resolved to kind {provider.kind!r}"
+            assert provider.name
+        finally:
+            config.LLM_BACKEND = original
+
+
+def test_auto_detection_picks_the_provider_from_whichever_key_is_present(monkeypatch):
+    """The point of auto: the tester drops any one key into .env and that
+    provider is used, with no other edit. Nobody knows in advance which key they
+    will have."""
+    monkeypatch.setattr(config, "LLM_BACKEND", "auto")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", None)
+    monkeypatch.setattr(config, "CUSTOM_BASE_URL", "")
+    for var in ("ANTHROPIC_API_KEY", *(k for _, k, _ in config.OPENAI_COMPATIBLE.values())):
+        monkeypatch.delenv(var, raising=False)
+
+    # Nothing set: runnable rather than broken.
+    assert config.resolve().kind == "offline"
+
+    # A DeepSeek key alone is enough to select DeepSeek.
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+    detected = config.resolve()
+    assert detected.name == "deepseek"
+    assert detected.kind == "openai_compatible"
+    assert detected.base_url.startswith("https://api.deepseek.com")
+    assert detected.detected is True
+
+    # A native-API key outranks it, because its key cannot be used over the
+    # OpenAI protocol and mis-detecting it would fail every question.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    assert config.resolve().name == "anthropic"
+
+
+def test_custom_provider_reaches_an_unlisted_endpoint(monkeypatch):
+    """An OpenAI-compatible provider that is not in the table -- or did not exist
+    when this was written -- must work from .env alone."""
+    monkeypatch.setattr(config, "LLM_BACKEND", "custom")
+    monkeypatch.setattr(config, "CUSTOM_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setattr(config, "CUSTOM_API_KEY", "whatever-key")
+    monkeypatch.setattr(config, "CUSTOM_MODEL", "some-new-model")
+
+    provider = config.resolve()
+    assert provider.kind == "openai_compatible"
+    assert provider.base_url == "https://llm.example.test/v1"
+    assert provider.model == "some-new-model"
+
+
+def test_local_server_needs_no_key(monkeypatch):
+    """Ollama and LM Studio serve the OpenAI protocol on localhost without
+    credentials; demanding a key would make a local model unusable."""
+    monkeypatch.setattr(config, "LLM_BACKEND", "ollama")
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    monkeypatch.setenv("RAG_OLLAMA_MODEL", "llama3.1")
+    provider = config.resolve()
+    assert provider.kind == "openai_compatible"
+    assert provider.base_url.startswith("http://localhost")
+    assert provider.api_key, "a local endpoint still needs a placeholder bearer value"
+
+
+@pytest.mark.parametrize(
+    "provider,key_var",
+    [("gemini", "GEMINI_API_KEY"), ("groq", "GROQ_API_KEY"),
+     ("openai", "OPENAI_API_KEY"), ("deepseek", "DEEPSEEK_API_KEY")],
+)
+def test_missing_provider_key_is_a_question_level_error(
+    client, monkeypatch, provider, key_var
+):
+    """A provider named without its key must fail the question with a clear code
+    naming the variable to set -- not crash the batch, and never fall back to a
+    different provider, which would make the run's `system` block a lie."""
     from backend import generate, retrieval
     monkeypatch.setattr(config, "LLM_BACKEND", provider)
     monkeypatch.setattr(config, "GEMINI_API_KEY", None)
-    monkeypatch.setattr(config, "GROQ_API_KEY", None)
+    monkeypatch.delenv(key_var, raising=False)
 
     contexts, _ = retrieval.retrieve(UZ_LATN_Q, top_k=3)
     with pytest.raises(generate.GenerationError) as excinfo:
         generate.generate(UZ_LATN_Q, "uz-Latn", contexts, temperature=0, seed=1)
     assert excinfo.value.code == "LLM_ERROR"
-    assert provider in str(excinfo.value).lower()
+    assert key_var in str(excinfo.value)
+
+
+def test_provider_without_a_model_says_how_to_find_one(client, monkeypatch):
+    """Model line-ups move, so several presets ship no default. The error has to
+    point at the command that lists what the key can reach, not just fail."""
+    from backend import generate, retrieval
+    monkeypatch.setattr(config, "LLM_BACKEND", "together")
+    monkeypatch.setenv("TOGETHER_API_KEY", "test-key")
+    monkeypatch.delenv("RAG_TOGETHER_MODEL", raising=False)
+
+    contexts, _ = retrieval.retrieve(UZ_LATN_Q, top_k=3)
+    with pytest.raises(generate.GenerationError) as excinfo:
+        generate.generate(UZ_LATN_Q, "uz-Latn", contexts, temperature=0, seed=3)
+    assert "list_models.py together" in str(excinfo.value)
+    assert "RAG_TOGETHER_MODEL" in str(excinfo.value)
 
 
 def test_unknown_backend_is_rejected(client, monkeypatch):
@@ -429,7 +574,11 @@ def test_unknown_backend_is_rejected(client, monkeypatch):
     contexts, _ = retrieval.retrieve(UZ_LATN_Q, top_k=3)
     with pytest.raises(generate.GenerationError) as excinfo:
         generate.generate(UZ_LATN_Q, "uz-Latn", contexts, temperature=0, seed=2)
-    assert "anthropic, gemini, groq or offline" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "not-a-provider" in message
+    # The error must tell the reader how to use a provider nobody anticipated.
+    assert "RAG_CUSTOM_BASE_URL" in message
+    assert "deepseek" in message
 
 
 def test_gemini_schema_drops_additional_properties():
@@ -575,6 +724,40 @@ def test_retry_gives_up_when_budget_exhausted(client, monkeypatch):
     with pytest.raises(generate.GenerationError):
         pipeline._generate_with_retry(UZ_LATN_Q, "uz-Latn", contexts, 0, 42, notes)
     assert any("giving up" in n for n in notes), notes
+
+
+@pytest.mark.parametrize("message", [
+    # Groq uses both wordings. Matching only the first one sent the second to
+    # the generic 400 branch, where "token" in the body mislabelled it
+    # CONTEXT_TOO_LONG and non-retryable -- observed on a real batch.
+    '{"error":{"message":"Failed to validate JSON. Please adjust your prompt."}}',
+    '{"error":{"message":"Failed to generate JSON. Please adjust your prompt. '
+    'max_tokens reached"}}',
+])
+def test_provider_json_failure_is_retryable_not_context_too_long(message):
+    import httpx
+    from backend import generate
+    response = httpx.Response(400, text=message)
+    error = generate._http_error("groq", httpx.HTTPStatusError(
+        "400", request=httpx.Request("POST", "http://x"), response=response))
+    assert error.code == "LLM_ERROR", error.code
+    assert error.retryable is True
+
+
+def test_salvageable_json_is_parsed_rather_than_retried():
+    """When the provider hands back the output it rejected, our parser gets a
+    look before a retry is spent -- its validator is stricter than json.loads."""
+    import httpx
+    from backend import generate
+    good = json.dumps({"no_answer": False, "answer": "x [1]",
+                       "used": [{"ref": 1, "context": 1, "quote": "q"}],
+                       "confidence": 0.5})
+    response = httpx.Response(400, json={"error": {
+        "message": "Failed to validate JSON", "failed_generation": good}})
+    with pytest.raises(generate._SalvageableJSON) as excinfo:
+        generate._http_error("groq", httpx.HTTPStatusError(
+            "400", request=httpx.Request("POST", "http://x"), response=response))
+    assert excinfo.value.raw == good
 
 
 def test_retry_after_header_is_honoured():

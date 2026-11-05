@@ -238,7 +238,9 @@ def get_health():
         checks["articles_indexed"] = f"error: {type(e).__name__}"
         healthy = False
 
-    checks["llm_backend"] = config.LLM_BACKEND
+    provider = config.resolve()
+    checks["llm_provider"] = provider.name + (" (auto-detected)" if provider.detected else "")
+    checks["llm_model"] = provider.model or "(not set)"
     body = {"status": "ok" if healthy else "degraded", "checks": checks,
             "system": pipeline.system_block()}
     return schemas.Utf8JSONResponse(status_code=200 if healthy else 503, content=body)

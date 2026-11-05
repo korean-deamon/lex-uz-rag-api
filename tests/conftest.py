@@ -38,9 +38,9 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    if rag_config.LLM_BACKEND == "anthropic":
+    if rag_config.resolve().kind != "offline":
         return
-    skip = pytest.mark.skip(reason="needs RAG_LLM_BACKEND=anthropic (semantic judgement)")
+    skip = pytest.mark.skip(reason="needs a real provider key (semantic judgement)")
     for item in items:
         if "needs_llm" in item.keywords:
             item.add_marker(skip)

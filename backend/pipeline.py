@@ -311,7 +311,7 @@ def system_block() -> dict:
         "pipeline_version": config.PIPELINE_VERSION,
         # Provider as well as model id: the same run scored on two providers is
         # two different systems, and "llm_model" alone would not say which.
-        "llm_provider": config.LLM_BACKEND,
+        "llm_provider": config.llm_provider(),
         "llm_model": config.llm_model(),
         "embedding_model": config.EMBEDDING_MODEL,
         "reranker": config.RERANKER_NAME,
@@ -409,17 +409,19 @@ def _sampling_caveat() -> str:
         "so an identical request returns an identical answer; retrieval is "
         "deterministic by construction."
     )
-    if config.LLM_BACKEND == "groq":
+    provider = config.resolve()
+    if provider.kind == "openai_compatible":
         return (
-            "temperature and seed are both passed to Groq, which accepts them, so this "
-            "run honours the spec's reproducibility request literally." + shared
+            f"temperature and seed are both sent to {provider.name}, which accepts them "
+            "on most models; where a model rejects one it is dropped and the drop is "
+            "recorded in debug." + shared
         )
-    if config.LLM_BACKEND == "gemini":
+    if provider.kind == "gemini":
         return (
             "temperature is passed to Gemini, which accepts it. Gemini has no seed "
             "parameter, so seed is recorded but not sent." + shared
         )
-    if config.LLM_BACKEND == "offline":
+    if provider.kind == "offline":
         return (
             "temperature and seed are recorded but meaningless on the offline backend, "
             "which does no sampling at all." + shared

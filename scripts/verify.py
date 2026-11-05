@@ -190,13 +190,17 @@ def step_provider(report: Report) -> str:
     """The only step that needs a credential."""
     from backend import config, generate, retrieval
 
-    backend = config.LLM_BACKEND
-    details = [f"RAG_LLM_BACKEND={backend}  model={config.llm_model()}"]
-
-    if backend == "offline":
+    provider = config.resolve()
+    how = "auto-detected" if provider.detected else "set in .env"
+    details = [
+        f"provider: {provider.name} ({how})",
+        f"model:    {provider.model or '(not set)'}",
+    ]
+    if provider.kind == "offline":
         details.append("offline generator: no credential needed, and no real answers")
         details.append("it cannot judge no_answer and cannot honour answer_language")
-        details.append("fix: set a provider key and RAG_LLM_BACKEND=gemini|groq|anthropic")
+        details.append("fix: put any provider key in .env -- with RAG_LLM_BACKEND=auto")
+        details.append("     the key itself picks the provider. See TESTING.md.")
         return report.add("Generation", SKIP, details)
 
     question = RETRIEVAL_CHECKS[0][0]

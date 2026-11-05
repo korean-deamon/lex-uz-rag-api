@@ -6,6 +6,7 @@ Everything the test spec needs to be able to compare runs across system changes
 in one file rather than a grep across the pipeline.
 """
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -32,36 +33,72 @@ LEX_SNAPSHOT_DATE = os.getenv("LEX_SNAPSHOT_DATE", "2026-07-01")
 # --- generation -------------------------------------------------------------
 # Which provider answers questions. Retrieval is identical for all of them, so
 # switching providers changes only the generation half of the pipeline -- which
-# is the point: the run's `system.llm_model` records which one produced it, so
-# two runs on different providers stay comparable.
-#   anthropic  Claude via the official SDK
-#   gemini     Google Gemini via the generativelanguage REST API
-#   groq       Groq via its OpenAI-compatible REST API
+# is the point: the run's `system.llm_provider` and `llm_model` record which one
+# produced it, so two runs on different providers stay distinguishable.
+#
+# Most providers speak the OpenAI chat-completions protocol, so they need no
+# code of their own -- only a base URL. The table below is therefore a
+# convenience, not a limit: `custom` reaches anything OpenAI-compatible that is
+# not listed, including a provider that did not exist when this was written, and
+# a locally served model.
+#
+#   auto       pick a provider from whichever key is present (see resolve())
+#   anthropic  Claude -- native API, official SDK
+#   gemini     Google Gemini -- native generativelanguage API
+#   openai | groq | deepseek | openrouter | together | fireworks | mistral
+#     | xai | cerebras | ollama        -- OpenAI-compatible
+#   custom     OpenAI-compatible, with RAG_CUSTOM_BASE_URL / _API_KEY / _MODEL
 #   offline    deterministic extractive answerer; no credential, no network
-LLM_BACKEND = os.getenv("RAG_LLM_BACKEND", "anthropic")
+LLM_BACKEND = os.getenv("RAG_LLM_BACKEND", "auto")
 
-# Per-provider model id. Each provider names its models differently, so one
-# variable per provider beats one shared variable that is wrong for three of
-# them. Override whichever you use; `python scripts/list_models.py <provider>`
-# prints what your key can actually reach.
-# These defaults are only defaults: which models a key can reach varies by
-# account, tier and region, and the line-ups move. `gemini-2.0-flash` and
-# `llama-3.3-70b-versatile` were the first guesses here and neither existed on
-# the keys we tested. Run `python scripts/list_models.py <provider>` and set the
-# matching variable rather than trusting these. Prefer a pinned version over an
-# alias like `gemini-flash-latest`: an alias silently changes the model under a
-# fixed `pipeline_version`, which is exactly what makes two runs incomparable.
+# name -> (base URL, env var holding the key, default model or "" if unknown)
+#
+# Models are left blank where guessing would be worse than asking: a wrong
+# default fails with "model not found", which reads like a broken key. Where a
+# provider has one obvious workhorse model it is filled in. Either way
+# `python scripts/list_models.py <provider>` prints what the key can reach, and
+# a pinned version beats an alias -- an alias changes the model under a fixed
+# pipeline_version, which is what makes two runs incomparable.
+OPENAI_COMPATIBLE: dict[str, tuple[str, str, str]] = {
+    "openai":     ("https://api.openai.com/v1",            "OPENAI_API_KEY",     ""),
+    "groq":       ("https://api.groq.com/openai/v1",        "GROQ_API_KEY",       ""),
+    "deepseek":   ("https://api.deepseek.com/v1",           "DEEPSEEK_API_KEY",   "deepseek-chat"),
+    "openrouter": ("https://openrouter.ai/api/v1",          "OPENROUTER_API_KEY", ""),
+    "together":   ("https://api.together.xyz/v1",           "TOGETHER_API_KEY",   ""),
+    "fireworks":  ("https://api.fireworks.ai/inference/v1", "FIREWORKS_API_KEY",  ""),
+    "mistral":    ("https://api.mistral.ai/v1",             "MISTRAL_API_KEY",    ""),
+    "xai":        ("https://api.x.ai/v1",                   "XAI_API_KEY",        ""),
+    "cerebras":   ("https://api.cerebras.ai/v1",            "CEREBRAS_API_KEY",   ""),
+    # Local servers need no key; both expose the OpenAI protocol.
+    "ollama":     ("http://localhost:11434/v1",             "OLLAMA_API_KEY",     ""),
+    "lmstudio":   ("http://localhost:1234/v1",              "LMSTUDIO_API_KEY",   ""),
+}
+
 ANTHROPIC_MODEL = os.getenv("RAG_ANTHROPIC_MODEL", "claude-haiku-5-5")
 GEMINI_MODEL = os.getenv("RAG_GEMINI_MODEL", "gemini-3.5-flash")
-GROQ_MODEL = os.getenv("RAG_GROQ_MODEL", "openai/gpt-oss-120b")
-
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
 GEMINI_BASE_URL = os.getenv(
     "RAG_GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"
 )
-GROQ_BASE_URL = os.getenv("RAG_GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+
+# Anything OpenAI-compatible that the table does not name.
+CUSTOM_BASE_URL = os.getenv("RAG_CUSTOM_BASE_URL", "")
+CUSTOM_API_KEY = os.getenv("RAG_CUSTOM_API_KEY") or os.getenv("RAG_API_KEY")
+CUSTOM_MODEL = os.getenv("RAG_CUSTOM_MODEL", "")
+
+# Presets that serve a local model and so need no credential.
+LOCAL_PRESETS = ("ollama", "lmstudio")
+
+# Order `auto` searches. Native APIs first -- a key for one of those cannot be
+# used through the OpenAI protocol, so detecting it correctly matters most.
+#
+# The local presets are deliberately excluded: having no key, they always
+# "resolve", so auto would pick Ollama on localhost even with nothing running
+# there and fail every question with a connection error instead of falling back
+# to the offline generator. A local server has to be named outright.
+AUTO_ORDER = ("anthropic", "gemini", "custom") + tuple(
+    name for name in OPENAI_COMPATIBLE if name not in LOCAL_PRESETS
+)
 
 LLM_MAX_TOKENS = int(os.getenv("RAG_LLM_MAX_TOKENS", "2000"))
 LLM_TIMEOUT_S = float(os.getenv("RAG_LLM_TIMEOUT_S", "60"))
@@ -86,21 +123,122 @@ GEN_RETRY_BUDGET_S = float(os.getenv("RAG_GEN_RETRY_BUDGET_S", "45"))
 GEN_MIN_INTERVAL_S = float(os.getenv("RAG_GEN_MIN_INTERVAL_S", "0"))
 
 
+@dataclass(frozen=True)
+class Provider:
+    """Everything the generator needs, resolved from the environment.
+
+    `kind` is what decides the code path, and only three exist: the two native
+    APIs, and the OpenAI chat-completions protocol that everything else speaks.
+    Adding a provider that speaks that protocol is a table entry, not code.
+    """
+    name: str                 # "deepseek", "groq", "custom", ...
+    kind: str                 # "openai_compatible" | "anthropic" | "gemini" | "offline"
+    model: str
+    base_url: str = ""
+    api_key: str | None = None
+    key_var: str = ""
+    detected: bool = False    # chosen by `auto` rather than named outright
+
+
+def _provider_for(name: str) -> Provider | None:
+    """Build a Provider for `name`, or None if its credential is absent."""
+    if name == "offline":
+        return Provider("offline", "offline", "offline-extractive-v1")
+
+    if name == "anthropic":
+        # The SDK resolves credentials itself (env var, or an `ant auth login`
+        # profile), so only an explicit key is checked here.
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            return None
+        return Provider("anthropic", "anthropic",
+                        os.getenv("RAG_LLM_MODEL") or ANTHROPIC_MODEL,
+                        api_key=os.getenv("ANTHROPIC_API_KEY"),
+                        key_var="ANTHROPIC_API_KEY")
+
+    if name == "gemini":
+        if not GEMINI_API_KEY:
+            return None
+        return Provider("gemini", "gemini", GEMINI_MODEL,
+                        base_url=GEMINI_BASE_URL, api_key=GEMINI_API_KEY,
+                        key_var="GEMINI_API_KEY")
+
+    if name == "custom":
+        if not CUSTOM_BASE_URL:
+            return None
+        return Provider("custom", "openai_compatible", CUSTOM_MODEL,
+                        base_url=CUSTOM_BASE_URL, api_key=CUSTOM_API_KEY,
+                        key_var="RAG_CUSTOM_API_KEY")
+
+    preset = OPENAI_COMPATIBLE.get(name)
+    if preset is None:
+        return None
+    default_url, key_var, default_model = preset
+    api_key = os.getenv(key_var)
+    base_url = os.getenv(f"RAG_{name.upper()}_BASE_URL", default_url)
+    # A local server legitimately has no key.
+    local = base_url.startswith(("http://localhost", "http://127.0.0.1"))
+    if not api_key and not local:
+        return None
+    model = os.getenv(f"RAG_{name.upper()}_MODEL", default_model)
+    return Provider(name, "openai_compatible", model, base_url=base_url,
+                    api_key=api_key or "not-needed", key_var=key_var)
+
+
+def resolve() -> Provider:
+    """The active provider.
+
+    With RAG_LLM_BACKEND=auto (the default) the first provider in AUTO_ORDER
+    whose key is present wins. That is what makes "whatever key the tester has"
+    work without editing anything but .env: drop in DEEPSEEK_API_KEY and
+    DeepSeek is used; drop in OPENAI_API_KEY and OpenAI is. With nothing set it
+    falls back to the offline generator rather than failing to start, so the
+    service is always runnable.
+
+    Naming a backend explicitly skips detection, and is the right thing for a
+    scored run -- it fails loudly if that provider's key is missing instead of
+    silently answering with a different model than the one the run claims.
+    """
+    requested = (LLM_BACKEND or "auto").strip().lower()
+
+    if requested != "auto":
+        found = _provider_for(requested)
+        if found is not None:
+            return found
+        # Named but unusable: report it as itself so the error names the right
+        # key, rather than silently falling back to another provider.
+        if requested == "custom":
+            return Provider("custom", "openai_compatible", CUSTOM_MODEL,
+                            base_url=CUSTOM_BASE_URL, api_key=None,
+                            key_var="RAG_CUSTOM_BASE_URL")
+        if requested in OPENAI_COMPATIBLE:
+            url, key_var, model = OPENAI_COMPATIBLE[requested]
+            return Provider(requested, "openai_compatible",
+                            os.getenv(f"RAG_{requested.upper()}_MODEL", model),
+                            base_url=url, api_key=None, key_var=key_var)
+        if requested == "gemini":
+            return Provider("gemini", "gemini", GEMINI_MODEL,
+                            base_url=GEMINI_BASE_URL, api_key=None,
+                            key_var="GEMINI_API_KEY")
+        if requested == "anthropic":
+            return Provider("anthropic", "anthropic", ANTHROPIC_MODEL,
+                            api_key=None, key_var="ANTHROPIC_API_KEY")
+        return Provider(requested, "unknown", requested)
+
+    for name in AUTO_ORDER:
+        found = _provider_for(name)
+        if found is not None:
+            return Provider(**{**found.__dict__, "detected": True})
+    return Provider("offline", "offline", "offline-extractive-v1", detected=True)
+
+
 def llm_model() -> str:
-    """The model id for the active backend, as reported in `system.llm_model`."""
-    return {
-        "anthropic": ANTHROPIC_MODEL,
-        "gemini": GEMINI_MODEL,
-        "groq": GROQ_MODEL,
-        "offline": "offline-extractive-v1",
-    }.get(LLM_BACKEND, LLM_BACKEND)
+    """The model id for the active provider, as reported in `system.llm_model`."""
+    return resolve().model or "(model not set)"
 
 
-# Kept so an existing RAG_LLM_MODEL in someone's .env still selects the Claude
-# model, which is what it used to mean.
-LLM_MODEL = os.getenv("RAG_LLM_MODEL", ANTHROPIC_MODEL)
-if os.getenv("RAG_LLM_MODEL") and LLM_BACKEND == "anthropic":
-    ANTHROPIC_MODEL = LLM_MODEL
+def llm_provider() -> str:
+    return resolve().name
+
 
 # --- API behaviour ----------------------------------------------------------
 # Test key. Deliberately separate from any production key, per spec section 2.
