@@ -26,10 +26,12 @@ chunk_id, never on dict or search-result ordering, so the same question against
 the same index returns the same contexts in the same order every time -- the
 spec's reproducibility requirement.
 """
+import json
 import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
+from functools import lru_cache
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
@@ -186,6 +188,12 @@ SYNONYMS = {
     # Statutes write "har yilgi"; questions almost always say "yillik".
     "yillik": ["yilgi"],
     "yilgi": ["yillik"],
+    # Tax abbreviations people actually use. The statute never writes "QQS",
+    # only "qoʻshilgan qiymat soligʻi", so without this a question using the
+    # abbreviation shares no token with the section that answers it.
+    "qqs": ["qoʻshilgan", "qiymat"],
+    "ndfl": ["jismoniy", "shaxslar", "daromad"],
+    "bhm": ["bazaviy", "hisoblash", "miqdori"],
 }
 
 _TOKEN = re.compile(r"[0-9]+|[^\W\d_]+", re.UNICODE)
@@ -278,7 +286,13 @@ class LexicalIndex:
         for idx, art in enumerate(articles):
             # Title terms count double: an article's title is the most
             # discriminative part of it, and it is short.
-            tokens = tokenize(art.title) * 2 + tokenize(art.text)
+            # The section heading names the subject the article belongs to
+            # ("QOʻSHILGAN QIYMAT SOLIGʻI"), which is the only thing telling
+            # 13 identically-titled "Soliq stavkalari" articles apart. It is
+            # indexed once, not doubled: it discriminates between sections,
+            # not between articles inside one.
+            tokens = (tokenize(art.title) * 2 + tokenize(art.text)
+                      + tokenize(art.section) + tokenize(art.chapter))
             self.doc_len.append(len(tokens) or 1)
             tf: dict[str, int] = defaultdict(int)
             for t in tokens:
@@ -322,6 +336,34 @@ class LexicalIndex:
 _lexical: LexicalIndex | None = None
 
 
+@lru_cache(maxsize=1)
+def _section_titles() -> dict[str, dict[str, str]]:
+    """code -> section marker -> recovered title.
+
+    The corpus stores some sections as a bare marker ("X BOʻLIM.") because the
+    upstream parser dropped the title line after it. scripts/build_section_titles.py
+    recovers those from the raw sources; without them, an article's position in
+    the code is unreadable, which is how a question about the VAT rate ended up
+    with a correct-but-useless no_answer (see that script's docstring).
+    """
+    path = config.ROOT / "data" / "section_titles.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _full_section(code: str, section: str) -> str:
+    """The section as a human can read it, title included where recovered."""
+    section = (section or "").strip()
+    if not section:
+        return ""
+    title = _section_titles().get(code, {}).get(section)
+    return f"{section} {title}" if title else section
+
+
 def load_articles() -> list[Article]:
     """Read every indexed article's payload out of Qdrant, once."""
     client = qdrant()
@@ -363,7 +405,7 @@ def load_articles() -> list[Article]:
                     doc_type=meta["doc_type"],
                     edition_date=meta["edition_date"],
                     doc_status=meta["doc_status"],
-                    section=pl.get("section") or "",
+                    section=_full_section(code, pl.get("section") or ""),
                     chapter=pl.get("chapter") or "",
                 )
             )

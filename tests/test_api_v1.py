@@ -454,6 +454,146 @@ def test_gemini_schema_drops_additional_properties():
     ]
 
 
+# -- the article's place in the code must reach the model -------------------
+def test_section_titles_were_recovered():
+    """The corpus stores some sections as a bare marker ("X BOʻLIM.") because
+    the upstream parser dropped the title line. Those titles are the only thing
+    distinguishing 13 identically-titled "Soliq stavkalari" articles, so losing
+    them cost a correct answer about the VAT rate."""
+    from backend import retrieval
+    titles = retrieval._section_titles()
+    assert titles, "data/section_titles.json is missing or unreadable"
+    assert titles["soliq_kodeksi"]["X BOʻLIM."] == "QOʻSHILGAN QIYMAT SOLIGʻI"
+    # And the recovery must actually be applied to the loaded articles.
+    assert retrieval._full_section("soliq_kodeksi", "X BOʻLIM.") == (
+        "X BOʻLIM. QOʻSHILGAN QIYMAT SOLIGʻI"
+    )
+    # A section that already carries its title is left alone.
+    assert retrieval._full_section("bojxona_kodeksi", "II boʻlim. Bojxona rejimlari") == (
+        "II boʻlim. Bojxona rejimlari"
+    )
+    # An unknown code or empty section must not raise.
+    assert retrieval._full_section("no_such_code", "I BOʻLIM.") == "I BOʻLIM."
+    assert retrieval._full_section("soliq_kodeksi", "") == ""
+
+
+def test_vat_rate_article_is_retrieved_with_its_section(client):
+    """The regression this guards: asked for the VAT rate, retrieval must put
+    the VAT-section rate article first, and the context handed to the model must
+    say which tax it belongs to -- the article text says only "soliq stavkasi 12
+    foiz" and never names VAT."""
+    from backend import generate, retrieval
+    contexts, _ = retrieval.retrieve("Soliq kodeksiga koʻra QQS stavkasi necha foiz?", top_k=5)
+    top = contexts[0]
+    assert top.article_meta.article_id == "258", [c.article for c in contexts]
+    assert "QOʻSHILGAN QIYMAT" in top.article_meta.section
+
+    prompt = generate.build_prompt("QQS stavkasi?", "uz-Latn", contexts)
+    assert "location:" in prompt
+    assert "QOʻSHILGAN QIYMAT SOLIGʻI" in prompt, "the model cannot tell which tax this is"
+
+
+def test_prompt_omits_location_when_unknown():
+    """No heading is better than an empty one: a blank `location:` line would be
+    noise in every context block for documents that have no sections."""
+    from backend import generate, retrieval
+    article = retrieval.Article(
+        point_id="p", chunk_id="lex:1#art-1", doc_id="lex:1", code="c",
+        article_id="1", article_display="1-modda", title="T", text="body",
+        url="u", doc_title="D", doc_type="kodeks", edition_date="2026-07-01",
+        doc_status="amalda", section="", chapter="",
+    )
+    context = retrieval.Context(
+        rank=1, chunk_id=article.chunk_id, doc_id=article.doc_id,
+        article=article.article_display, text=article.text,
+        retrieval_score=0.5, rerank_score=0.5, article_meta=article,
+    )
+    assert "location:" not in generate.build_prompt("q", "uz-Latn", [context])
+
+
+def test_retryable_generation_error_is_retried(client, monkeypatch):
+    """A provider 429 is the provider's quota, not a property of the question.
+    It must be retried rather than scored as a permanent failure."""
+    from backend import generate, pipeline, retrieval
+    monkeypatch.setattr(config, "GEN_MAX_RETRIES", 2)
+    monkeypatch.setattr(config, "GEN_RETRY_BUDGET_S", 10)
+
+    calls = {"n": 0}
+    good = generate.GenerationResult(
+        answer="ok [1]", no_answer=False, confidence=0.9,
+        citations=[], model="stub",
+    )
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise generate.GenerationError("LLM_ERROR", "rate limited", True, retry_after=0.01)
+        return good
+
+    monkeypatch.setattr(generate, "generate", flaky)
+    contexts, _ = retrieval.retrieve(UZ_LATN_Q, top_k=3)
+    notes: list[str] = []
+    result = pipeline._generate_with_retry(UZ_LATN_Q, "uz-Latn", contexts, 0, 42, notes)
+
+    assert result is good
+    assert calls["n"] == 3, "should have retried twice then succeeded"
+    assert len(notes) == 2, notes
+
+
+def test_non_retryable_generation_error_is_not_retried(client, monkeypatch):
+    """A bad credential or an over-long context will fail identically every
+    time; retrying only burns the budget."""
+    from backend import generate, pipeline, retrieval
+    monkeypatch.setattr(config, "GEN_MAX_RETRIES", 3)
+
+    calls = {"n": 0}
+
+    def always_fatal(*args, **kwargs):
+        calls["n"] += 1
+        raise generate.GenerationError("CONTEXT_TOO_LONG", "too long", False)
+
+    monkeypatch.setattr(generate, "generate", always_fatal)
+    contexts, _ = retrieval.retrieve(UZ_LATN_Q, top_k=3)
+    with pytest.raises(generate.GenerationError):
+        pipeline._generate_with_retry(UZ_LATN_Q, "uz-Latn", contexts, 0, 42, [])
+    assert calls["n"] == 1, "a non-retryable error must not be retried"
+
+
+def test_retry_gives_up_when_budget_exhausted(client, monkeypatch):
+    """A provider asking for longer than the budget allows must not stall the
+    batch: give up and report, letting the tester retry the batch instead."""
+    from backend import generate, pipeline, retrieval
+    monkeypatch.setattr(config, "GEN_MAX_RETRIES", 5)
+    monkeypatch.setattr(config, "GEN_RETRY_BUDGET_S", 1)
+
+    def rate_limited(*args, **kwargs):
+        raise generate.GenerationError("LLM_ERROR", "rate limited", True, retry_after=600)
+
+    monkeypatch.setattr(generate, "generate", rate_limited)
+    contexts, _ = retrieval.retrieve(UZ_LATN_Q, top_k=3)
+    notes: list[str] = []
+    with pytest.raises(generate.GenerationError):
+        pipeline._generate_with_retry(UZ_LATN_Q, "uz-Latn", contexts, 0, 42, notes)
+    assert any("giving up" in n for n in notes), notes
+
+
+def test_retry_after_header_is_honoured():
+    """Groq and Gemini both send Retry-After on 429; obeying it beats guessing."""
+    import httpx
+    from backend import generate
+    response = httpx.Response(429, headers={"retry-after": "7"}, text="slow down")
+    error = generate._http_error("Groq", httpx.HTTPStatusError(
+        "429", request=httpx.Request("POST", "http://x"), response=response))
+    assert error.retryable is True
+    assert error.retry_after == 7.0
+
+    # An HTTP-date Retry-After is valid but not a number; fall back to backoff.
+    dated = httpx.Response(429, headers={"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"})
+    error = generate._http_error("Groq", httpx.HTTPStatusError(
+        "429", request=httpx.Request("POST", "http://x"), response=dated))
+    assert error.retry_after is None
+
+
 def test_fenced_json_is_parsed(client):
     """Models wrap JSON in ```json fences even when told not to; that is a
     formatting quirk, not a failed question."""

@@ -77,17 +77,31 @@ def probe(provider: str, model: str | None) -> int:
     if model:
         setattr(config, f"{provider.upper()}_MODEL", model)
 
-    from backend import generate, retrieval
+    from backend import generate, pipeline, retrieval
 
     print(f"\nprobe: {provider} / {config.llm_model()}")
     contexts, _ = retrieval.retrieve(PROBE_QUESTION, top_k=5)
     print(f"  retrieved {len(contexts)} contexts, top = {contexts[0].chunk_id}")
+
+    # Go through the retry path, not generate() directly: providers answer 503
+    # "high demand" and 429 often enough that a one-shot probe would report a
+    # perfectly good key as broken.
+    notes: list[str] = []
     try:
-        result = generate.generate(PROBE_QUESTION, "uz-Latn", contexts)
+        result = pipeline._generate_with_retry(
+            PROBE_QUESTION, "uz-Latn", contexts, temperature=0, seed=42, notes=notes,
+        )
     except generate.GenerationError as e:
+        for note in notes:
+            print(f"  {note}")
         print(f"  FAILED  code={e.code} retryable={e.retryable}")
         print(f"          {e.message[:300]}")
+        if e.retryable:
+            print("          retryable: the key looks fine, the provider is busy or"
+                  " rate-limiting. Try again, or try another model.")
         return 1
+    for note in notes:
+        print(f"  {note}")
 
     print(f"  model      {result.model}")
     print(f"  no_answer  {result.no_answer}")

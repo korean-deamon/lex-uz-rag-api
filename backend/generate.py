@@ -37,6 +37,8 @@ these applies to the run being scored.
 import hashlib
 import json
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 
 import anthropic
@@ -56,11 +58,16 @@ class GenerationError(Exception):
     """A question-level failure. Carries the spec's error vocabulary so one bad
     question degrades to `status: "error"` instead of failing the batch."""
 
-    def __init__(self, code: str, message: str, retryable: bool):
+    def __init__(self, code: str, message: str, retryable: bool,
+                 retry_after: float | None = None):
         super().__init__(message)
         self.code = code
         self.message = message
         self.retryable = retryable
+        # Seconds the provider asked us to wait, when it said so. Honouring it
+        # beats guessing a backoff: free tiers hand out tight per-minute quotas
+        # and a 100-question run walks straight into them.
+        self.retry_after = retry_after
 
 
 @dataclass
@@ -160,10 +167,20 @@ def build_prompt(question: str, answer_language: str, contexts: list[Context]) -
     blocks = []
     for ctx in contexts:
         art = ctx.article_meta
+        # The article's position in the code is part of its meaning and was
+        # missing from this prompt. Thirteen articles of the Tax Code are titled
+        # "Soliq stavkalari" and each states a rate without ever naming its tax
+        # -- article 258 says "soliq stavkasi 12 foiz" and is the VAT rate only
+        # because it sits in the VAT section. Without the heading, a question
+        # about VAT got a correct-but-useless no_answer: the model could not tell
+        # which tax the 12% belonged to, and refusing was the right call on the
+        # context it was given.
+        location = " / ".join(p for p in (art.section, art.chapter) if p)
         blocks.append(
             f"CONTEXT {ctx.rank}\n"
             f"document: {art.doc_title}\n"
-            f"article: {art.article_display}"
+            + (f"location: {location}\n" if location else "")
+            + f"article: {art.article_display}"
             + (f" ({_article_title(art)})" if _article_title(art) else "")
             + f"\ntext:\n{_article_body(art)}"
         )
@@ -226,6 +243,7 @@ def generate(
     if cached is not None:
         return cached
 
+    _pace()
     backend = config.LLM_BACKEND
     if backend == "offline":
         result = _generate_offline(question, answer_language, contexts)
@@ -245,6 +263,28 @@ def generate(
     if len(_ANSWER_CACHE) < _ANSWER_CACHE_MAX:
         _ANSWER_CACHE[key] = result
     return result
+
+
+# --------------------------------------------------------------------------
+# Call pacing
+# --------------------------------------------------------------------------
+# Questions inside a batch are answered in a loop, so without pacing a batch of
+# 10 fires 10 provider calls as fast as retrieval allows. On a free tier that
+# bursts straight through a per-minute quota; spacing the calls stays inside it
+# instead of earning a 429 and then waiting anyway.
+_pace_lock = threading.Lock()
+_last_call = 0.0
+
+
+def _pace() -> None:
+    if config.GEN_MIN_INTERVAL_S <= 0:
+        return
+    global _last_call
+    with _pace_lock:
+        gap = config.GEN_MIN_INTERVAL_S - (time.monotonic() - _last_call)
+        if _last_call and gap > 0:
+            time.sleep(gap)
+        _last_call = time.monotonic()
 
 
 # --------------------------------------------------------------------------
@@ -295,11 +335,24 @@ def _parse_answer_json(text: str, model: str, input_tokens: int,
     )
 
 
+def _retry_after(response: httpx.Response) -> float | None:
+    raw = response.headers.get("retry-after")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None  # HTTP-date form; fall back to our own backoff
+
+
 def _http_error(provider: str, e: httpx.HTTPStatusError) -> GenerationError:
     status = e.response.status_code
     body = e.response.text[:300]
     if status == 429:
-        return GenerationError("LLM_ERROR", f"{provider} rate limited: {body}", True)
+        return GenerationError(
+            "LLM_ERROR", f"{provider} rate limited: {body}", True,
+            retry_after=_retry_after(e.response),
+        )
     if status in (400, 404) and "token" in body.lower():
         return GenerationError("CONTEXT_TOO_LONG", f"{provider}: {body}", False)
     if status in (401, 403):

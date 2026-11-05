@@ -44,9 +44,16 @@ LLM_BACKEND = os.getenv("RAG_LLM_BACKEND", "anthropic")
 # variable per provider beats one shared variable that is wrong for three of
 # them. Override whichever you use; `python scripts/list_models.py <provider>`
 # prints what your key can actually reach.
+# These defaults are only defaults: which models a key can reach varies by
+# account, tier and region, and the line-ups move. `gemini-2.0-flash` and
+# `llama-3.3-70b-versatile` were the first guesses here and neither existed on
+# the keys we tested. Run `python scripts/list_models.py <provider>` and set the
+# matching variable rather than trusting these. Prefer a pinned version over an
+# alias like `gemini-flash-latest`: an alias silently changes the model under a
+# fixed `pipeline_version`, which is exactly what makes two runs incomparable.
 ANTHROPIC_MODEL = os.getenv("RAG_ANTHROPIC_MODEL", "claude-haiku-5-5")
-GEMINI_MODEL = os.getenv("RAG_GEMINI_MODEL", "gemini-2.0-flash")
-GROQ_MODEL = os.getenv("RAG_GROQ_MODEL", "llama-3.3-70b-versatile")
+GEMINI_MODEL = os.getenv("RAG_GEMINI_MODEL", "gemini-3.5-flash")
+GROQ_MODEL = os.getenv("RAG_GROQ_MODEL", "openai/gpt-oss-120b")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -58,6 +65,25 @@ GROQ_BASE_URL = os.getenv("RAG_GROQ_BASE_URL", "https://api.groq.com/openai/v1")
 
 LLM_MAX_TOKENS = int(os.getenv("RAG_LLM_MAX_TOKENS", "2000"))
 LLM_TIMEOUT_S = float(os.getenv("RAG_LLM_TIMEOUT_S", "60"))
+
+# Per-question retry for a *retryable* generation failure -- almost always the
+# provider's own 429. Without this, a free-tier per-minute quota turns a
+# 100-question run into dozens of LLM_ERROR results that say nothing about the
+# system being evaluated. The budget caps how long one question may spend
+# waiting, so a rate-limited provider cannot stall a batch indefinitely; past
+# the batch's sync deadline the 202 async path takes over, which is what it is
+# there for.
+# 45s because free tiers ask for real waits: Groq's free tier answers a
+# tokens-per-minute 429 with Retry-After around 33s, and a 25s budget gave up
+# just short of it, turning a survivable rate limit into a scored failure.
+GEN_MAX_RETRIES = int(os.getenv("RAG_GEN_MAX_RETRIES", "2"))
+GEN_RETRY_BUDGET_S = float(os.getenv("RAG_GEN_RETRY_BUDGET_S", "45"))
+
+# Minimum gap between generation calls. 0 disables it. Set this to stay under a
+# provider's requests-per-minute limit instead of bursting and retrying: on a
+# 30 req/min key, RAG_GEN_MIN_INTERVAL_S=2 keeps a 100-question run inside the
+# quota from the start.
+GEN_MIN_INTERVAL_S = float(os.getenv("RAG_GEN_MIN_INTERVAL_S", "0"))
 
 
 def llm_model() -> str:

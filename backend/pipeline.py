@@ -120,6 +120,57 @@ def renumber_markers(answer: str, remap: dict[int, int]) -> str:
     return re.sub(r"\s+([.,;:])", r"\1", _MARKER.sub(sub, answer)).strip()
 
 
+def _generate_with_retry(
+    question: str,
+    answer_language: str,
+    contexts: list[retrieval.Context],
+    temperature: float | None,
+    seed: int | None,
+    notes: list[str],
+) -> generate.GenerationResult:
+    """Generate, retrying a retryable failure within a bounded time budget.
+
+    `notes` is appended to in place, so the attempts are visible in `debug`
+    whether the question eventually succeeded or not.
+
+    A provider's 429 is not a property of the question, so letting it become a
+    permanent `LLM_ERROR` result would charge the pipeline for the provider's
+    quota: a free-tier key would score far worse than the same system on a paid
+    one. The budget stops a rate-limited provider from stalling the batch -- past
+    the sync deadline the 202 async path takes over.
+
+    A non-retryable failure (bad credential, context too long, a refusal) is
+    raised immediately. Retrying those would only waste the budget.
+    """
+    deadline = time.monotonic() + config.GEN_RETRY_BUDGET_S
+    last: generate.GenerationError | None = None
+
+    for attempt in range(config.GEN_MAX_RETRIES + 1):
+        try:
+            return generate.generate(
+                question, answer_language, contexts,
+                temperature=temperature, seed=seed,
+            )
+        except generate.GenerationError as e:
+            last = e
+            if not e.retryable or attempt == config.GEN_MAX_RETRIES:
+                raise
+            # Exponential backoff unless the provider named a delay.
+            wait = e.retry_after if e.retry_after is not None else 2 ** attempt
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or wait > remaining:
+                notes.append(
+                    f"attempt {attempt + 1} failed ({e.code}); "
+                    f"needed {wait:.1f}s but only {max(0.0, remaining):.1f}s of "
+                    f"retry budget left, giving up"
+                )
+                raise
+            notes.append(f"attempt {attempt + 1} failed ({e.code}); retrying in {wait:.1f}s")
+            time.sleep(wait)
+
+    raise last  # unreachable; present so the contract is explicit
+
+
 def answer_question(item: dict, options: dict) -> dict:
     """One `results[]` entry. Never raises: a failure becomes status=error."""
     started = time.perf_counter()
@@ -186,15 +237,19 @@ def answer_question(item: dict, options: dict) -> dict:
 
     # --- generation ---
     t_generation = time.perf_counter()
+    retry_notes: list[str] = []
     try:
-        result = generate.generate(
+        result = _generate_with_retry(
             question,
             answer_language,
             contexts,
             temperature=options.get("temperature", 0),
             seed=options.get("seed"),
+            notes=retry_notes,
         )
     except generate.GenerationError as e:
+        if retry_notes:
+            debug["generation_retries"] = retry_notes
         base["status"] = STATUS_TIMEOUT if e.code == "LLM_TIMEOUT" else STATUS_ERROR
         base["error"] = {"code": e.code, "message": e.message, "retryable": e.retryable}
         base["timing"] = {
@@ -244,6 +299,8 @@ def answer_question(item: dict, options: dict) -> dict:
     if return_debug:
         debug["generator_model"] = result.model
         debug["verification_notes"] = notes + result.notes
+        if retry_notes:
+            debug["generation_retries"] = retry_notes
         base["debug"] = debug
     return base
 
