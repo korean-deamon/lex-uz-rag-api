@@ -19,10 +19,13 @@ data/runs/
 # 2026-07, and a teammate cloning a newer corpus would silently change the index
 # and make their eval scores incomparable with ours.
 #
-# Everything else from that repo is excluded: its own .git (5MB, and a nested
-# repo breaks `git add`), its agent/skill directories (third-party executable
-# content we did not review), its demo RAG code, and its 8.8MB of raw .txt
-# source, which nothing here reads.
+# Everything else from that repo is excluded, and deleted locally too: its own
+# .git (a nested repo makes `git add` commit a pointer instead of the files),
+# its agent/skill directories (third-party executable content we did not
+# review), its demo RAG code, and its 8.8 MB of raw .txt source. Only
+# scripts/build_section_titles.py ever read the raw text, and its output
+# (data/section_titles.json) is committed -- re-fetch the corpus at the commit
+# in data/corpus/CORPUS_SOURCE.md if you need to regenerate it.
 data/corpus/**/.git/
 data/corpus/**/.claude/
 data/corpus/**/.agents/
