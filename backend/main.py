@@ -111,5 +111,5 @@ def index():
             "openapi": "GET /docs",
         },
         "auth": "Authorization: Bearer <API_KEY>",
-        "docs": "see README.md and TESTING.md",
+        "docs": "see README.md, or TEST_QOLLANMASI.md to test this API",
     }
