@@ -10,6 +10,14 @@ Corpus: the Constitution, 20 codes and 4 laws of the Republic of Uzbekistan,
 **7383 articles**, one chunk per article (*modda*), from the Uzbek Legal Corpus
 snapshot `2026-07` (CC0, sourced from lex.uz).
 
+Three guides, by audience:
+
+| File | For | Language |
+|---|---|---|
+| `README.md` | whoever works on the code: architecture, retrieval, results | English |
+| `TESTING.md` | whoever runs it: per-platform setup, Linux / macOS / Windows | English |
+| `OQITUVCHI_UCHUN.md` | the reviewer testing the API against the spec | Uzbek |
+
 ---
 
 ## What was built
