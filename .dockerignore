@@ -1,0 +1,31 @@
+# Keep the build context small and the image free of local state.
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+
+# Local secrets never belong in an image layer. Compose passes .env in at run
+# time instead (env_file in docker-compose.yml).
+.env
+
+# Local state and output, rebuilt or remounted inside the container.
+data/batches.sqlite3*
+data/runs
+data/raw
+ingest/corpus_progress.json
+
+# The raw .txt sources of the corpus: 8.8 MB that only
+# scripts/build_section_titles.py ever read, and its output
+# (data/section_titles.json) is committed.
+data/corpus/uzbek-legal-corpus/data/raw
+
+# Not used by /v1: the scraper needs playwright and a ~400 MB browser, and the
+# Airflow job only writes to the separate lex_uz_raw collection.
+scraper
+orchestration
+
+*.pdf
+*.md

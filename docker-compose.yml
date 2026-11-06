@@ -1,12 +1,74 @@
+# One command brings the whole thing up:
+#
+#   docker compose up
+#
+# qdrant starts, the api container waits for it, builds the index if it is
+# missing (~85 minutes, once -- it is kept on a volume) and then serves on
+# http://localhost:8000.
+
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    # Pinned, not :latest -- index_version claims a fixed snapshot, so the
+    # store underneath it should not change on its own either.
+    image: qdrant/qdrant:v1.12.4
     container_name: lex_qdrant
     ports:
       - "6333:6333"   # REST API
       - "6334:6334"   # gRPC
     volumes:
       - qdrant_storage:/qdrant/storage
+    healthcheck:
+      # The image ships no curl or wget, so ask Qdrant over its own TCP port.
+      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build: .
+    container_name: lex_api
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    env_file:
+      # Optional: the defaults below are a complete working setup. Copy
+      # .env.example to .env only to point the API at your own LLM provider.
+      - path: .env
+        required: false
+    environment:
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-lex_uz}
+      RAG_API_KEYS: ${RAG_API_KEYS:-test-key-lex-2026}
+      # Answers without any credential or cost. Switch to your provider in .env.
+      RAG_LLM_BACKEND: ${RAG_LLM_BACKEND:-offline}
+      # Both on volumes: the batch store because the spec wants 30-day
+      # retention, the ingest progress file because it is what lets an
+      # interrupted index build resume instead of starting from zero.
+      RAG_STORE_PATH: /state/batches.sqlite3
+      INGEST_PROGRESS_FILE: /state/corpus_progress.json
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_models:/models     # embedding model, ~1.1 GB, downloaded once
+      - app_state:/state      # batch results + ingest progress
+      # Bind-mounted, not copied: the reviewer edits the test set on the host
+      # (filling expected_article / expected_answer) and reads the run output
+      # there, so both have to be the host's files rather than the image's.
+      - ./data/eval:/app/data/eval
+      - ./data/runs:/app/data/runs
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      # Generous: the first start may spend ~85 minutes building the index, and
+      # the container must not be called unhealthy while it is doing that.
+      start_period: 120m
 
 volumes:
   qdrant_storage:
+  hf_models:
+  app_state:
