@@ -2,16 +2,25 @@
 Test setup. The environment is configured before any backend import, because
 backend.config reads it at import time.
 
-The offline generator is used by default so the contract is testable without a
-model credential and without spending money on every test run. The tests that
+The offline generator is forced so the contract is testable without a model
+credential and without spending money on every test run. The tests that
 genuinely need a model are marked `needs_llm` and skipped unless
-RAG_LLM_BACKEND=anthropic is set explicitly.
+RAG_TEST_LLM_BACKEND names a real provider.
 """
 import os
 import tempfile
 from pathlib import Path
 
-os.environ.setdefault("RAG_LLM_BACKEND", "offline")
+# Overridden, not defaulted. setdefault left the ambient environment in charge,
+# so a .env -- or a container started from one -- that points at a real provider
+# silently turned the contract suite into a paid, paced run against that
+# provider: in the Docker image, where .env sets groq and a 20s interval, a
+# 30-second suite does not finish. The contract is about HTTP behaviour and the
+# offline generator exercises all of it. Opt in explicitly to use a real model.
+_TEST_BACKEND = os.getenv("RAG_TEST_LLM_BACKEND", "offline")
+os.environ["RAG_LLM_BACKEND"] = _TEST_BACKEND
+if _TEST_BACKEND == "offline":
+    os.environ["RAG_GEN_MIN_INTERVAL_S"] = "0"
 # A per-run store, so tests never read or write the real batch history.
 _STORE_DIR = tempfile.mkdtemp(prefix="rag-test-store-")
 os.environ["RAG_STORE_PATH"] = str(Path(_STORE_DIR) / "batches.sqlite3")

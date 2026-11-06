@@ -10,27 +10,33 @@ services:
   qdrant:
     # Pinned, not :latest -- index_version claims a fixed snapshot, so the
     # store underneath it should not change on its own either.
-    image: qdrant/qdrant:v1.12.4
+    #
+    # Pin forward, never back: Qdrant cannot read storage written by a newer
+    # version, and it does not fail gracefully. Pinning this to v1.12.4 while
+    # the volume had been written by 1.20.0 panicked on startup with
+    # "invalid type: sequence, expected a map", which reads as a corrupt index
+    # rather than as a version mismatch. Raising this pin is safe; lowering it
+    # needs `docker compose down -v` and a fresh 85-minute build.
+    image: qdrant/qdrant:v1.20.0
     container_name: lex_qdrant
     ports:
       - "6333:6333"   # REST API
       - "6334:6334"   # gRPC
     volumes:
       - qdrant_storage:/qdrant/storage
-    healthcheck:
-      # The image ships no curl or wget, so ask Qdrant over its own TCP port.
-      test: ["CMD", "sh", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-      start_period: 10s
+    # No healthcheck here on purpose. The image ships neither curl nor wget, so
+    # a check has to go through a shell, and the obvious one -- exec on
+    # /dev/tcp -- is a bash feature that fails under the image's default sh
+    # with "Directory nonexistent", which marks a perfectly healthy Qdrant
+    # unhealthy and then blocks the api container from starting at all.
+    # docker/entrypoint.py already polls Qdrant for up to 120s and says
+    # plainly what is wrong if it never answers, so that is the one mechanism.
 
   api:
     build: .
     container_name: lex_api
     depends_on:
-      qdrant:
-        condition: service_healthy
+      - qdrant
     env_file:
       # Optional: the defaults below are a complete working setup. Copy
       # .env.example to .env only to point the API at your own LLM provider.

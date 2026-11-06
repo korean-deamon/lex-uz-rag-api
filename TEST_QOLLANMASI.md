@@ -256,7 +256,10 @@ curl -X POST http://localhost:8000/v1/rag/batch \
   -H "Authorization: Bearer test-key-lex-2026" \
   -H "Content-Type: application/json" \
   -d '{
+    "run_id": "test-run",
     "batch_id": "test-001",
+    "batch_index": 1,
+    "total_batches": 1,
     "items": [
       {"id": "q1", "question": "Yillik asosiy mehnat taʼtili necha kun?"},
       {"id": "q2", "question": "Oʻgʻrilik uchun qanday jazo belgilangan?"},
@@ -264,6 +267,17 @@ curl -X POST http://localhost:8000/v1/rag/batch \
     ]
   }'
 ```
+
+**To'rt maydon majburiy** (spec §3), aks holda `400` qaytadi:
+
+| Maydon | Nima |
+|---|---|
+| `run_id` | butun baholash yurgizilishining nomi — bir necha batch'ni bitta run'ga bog'laydi |
+| `batch_id` | shu batch'ning nomi — idempotentlik kaliti, takrorini aniqlaydi |
+| `batch_index` | shu batch nechanchi (1 dan boshlanadi) |
+| `total_batches` | jami nechta batch bor |
+
+`batch_index` `total_batches` dan katta bo'lsa ham `400` qaytadi.
 
 > **Windows PowerShell'da** `curl` boshqacha ishlaydi. Oson yo'li — so'rovni
 > faylga yozib yuborish:
@@ -307,37 +321,84 @@ buzilmaydi.
 
 ## 5. Javobda nima qaytadi
 
-Bitta savolning javobi (qisqartirilgan):
+Quyidagilar **haqiqiy javobdan** olingan, qo'ldan yozilmagan.
+
+### Batch darajasi
+
+```json
+{
+  "run_id": "test-run",
+  "batch_id": "test-001",
+  "batch_index": 1,
+  "total_batches": 1,
+  "status": "completed",
+  "system": {
+    "pipeline_version": "1.0.0",
+    "llm_provider": "groq",
+    "llm_model": "openai/gpt-oss-120b",
+    "embedding_model": "intfloat/multilingual-e5-base",
+    "reranker": "hybrid-bm25-dense-v1",
+    "index_version": "lex-idx-2026-07-corpus-25",
+    "lex_snapshot_date": "2026-07-01"
+  },
+  "timing": {
+    "received_at": "2026-11-06T13:37:56+00:00",
+    "completed_at": "2026-11-06T13:38:18+00:00",
+    "total_ms": 22696
+  },
+  "summary": {"total": 2, "ok": 1, "no_answer": 1, "error": 0},
+  "options_echo": {
+    "top_k": 5, "return_contexts": true, "return_debug": false,
+    "temperature": 0.0, "seed": null, "as_of_date": null,
+    "answer_language": "auto"
+  },
+  "results": [ ... ]
+}
+```
+
+`system` va `options_echo` har javobda qaytadi — ya'ni **qaysi sozlama bilan
+olingani javobning o'zida** yozilgan, keyinroq taxmin qilish kerak emas.
+
+### Bitta savolning natijasi
 
 ```json
 {
   "id": "q1",
   "status": "ok",
-  "answer": "Har yilgi asosiy eng kam mehnat taʼtili yigirma bir kalendar kun [1].",
+  "answer": "Yillik asosiy mehnat taʼtili 21 kalendar kunni tashkil etadi[1].",
+  "answer_language": "uz-Latn",
+  "no_answer": false,
+  "confidence": 1.0,
   "citations": [
     {
       "ref": 1,
       "doc_id": "lex:6257288",
-      "document": "Oʻzbekiston Respublikasining Mehnat kodeksi",
+      "doc_title": "Oʻzbekiston Respublikasining Mehnat kodeksi",
+      "doc_type": "kodeks",
+      "url": "https://lex.uz/uz/docs/-6257288",
       "article": "217-modda",
-      "part": null,
-      "url": "https://lex.uz/docs/-6257288",
-      "quote": "yigirma bir kalendar kunni tashkil etadi",
+      "part": "1-qism",
+      "edition_date": "2026-07-01",
       "doc_status": "amalda",
-      "edition_date": "2026-07-01"
+      "chunk_id": "lex:6257288#art-217",
+      "quote": "Har yilgi asosiy eng kam mehnat taʼtilining davomiyligi yigirma bir kalendar kunni tashkil etadi."
     }
   ],
   "contexts": [
     {
       "rank": 1,
       "chunk_id": "lex:6257288#art-217",
-      "document": "Oʻzbekiston Respublikasining Mehnat kodeksi",
+      "doc_id": "lex:6257288",
       "article": "217-modda",
-      "score": 1.63,
-      "text": "Har yilgi asosiy eng kam mehnat taʼtilining davomiyligi ..."
+      "text": "Oʻzbekiston Respublikasining Mehnat kodeksi, 217-modda (Har yilgi asosiy eng kam mehnat taʼtilining davomiyligi)\nHar yilgi asosiy eng kam mehnat taʼtilining davomiyligi yigirma bir kalendar kunni tashkil etadi.",
+      "retrieval_score": 0.851411,
+      "rerank_score": 0.562388,
+      "used_in_answer": true
     }
   ],
-  "timing_ms": {"retrieval": 188, "generation": 2104, "total": 2292}
+  "debug": null,
+  "usage": {"input_tokens": 2460, "output_tokens": 330},
+  "error": null
 }
 ```
 
@@ -346,11 +407,51 @@ Bitta savolning javobi (qisqartirilgan):
 | Maydon | Nimani ko'rsatadi |
 |---|---|
 | `status` | `ok` · `no_answer` · `error` |
-| `citations[].quote` | **modda matnida aynan bor** — tekshirilgan |
+| `citations[].quote` | **modda matnida aynan bor** — kod tekshirgan |
 | `citations[].article` | aniq modda, taxmin emas |
+| `citations[].doc_title` | hujjat nomi (`doc_id` — lex.uz raqami) |
 | `contexts[]` | qidiruv nimani topgan — **qidiruvni alohida baholash uchun** |
 | `contexts[].rank` | to'g'ri modda nechanchi o'rinda (Hit@5 / MRR shundan) |
-| `timing_ms` | qidiruv va generatsiya vaqti **alohida** |
+| `contexts[].used_in_answer` | shu kontekst javobda ishlatilganmi (context precision shundan) |
+| `contexts[].retrieval_score` | birlashtirilgan ball (dense + BM25 + kodeks bonusi) |
+| `usage` | shu savol necha token olgani |
+| `debug` | `options.return_debug: true` bo'lsa to'ldiriladi — sitata nega tashlangani shu yerda |
+
+### `debug` — qidiruv ichini ko'rish
+
+Sukut bo'yicha `null`. Yoqish uchun so'rovga qo'shing:
+
+```json
+"options": {"return_debug": true}
+```
+
+Haqiqiy chiqish:
+
+```json
+{
+  "rewritten_query": "oʻgʻrilik oʻgʻirlik jazo",
+  "detected_codes": [],
+  "retrieved_total": 75,
+  "dense_candidates": 40,
+  "lexical_candidates": 40,
+  "scoped_candidates": 0,
+  "generator_model": "openai/gpt-oss-120b",
+  "verification_notes": []
+}
+```
+
+| Maydon | Nimani ko'rsatadi |
+|---|---|
+| `rewritten_query` | savol tozalangandan keyin qanday ko'rinishi (stopword, transliteratsiya, sinonim, o'zak) |
+| `detected_codes` | savol qaysi kodeksni atagani aniqlandimi |
+| `dense_candidates` / `lexical_candidates` | ikki qidiruv nechta nomzod bergani |
+| `scoped_candidates` | kodeks ichidan qo'shimcha nechta olingani |
+| `verification_notes` | **sitata nega tashlangani** — bo'sh bo'lsa, bitta ham tashlanmagan |
+
+`no_answer` sababini aniqlash shundan boshlanadi: `verification_notes` bo'sh
+bo'lsa, sitata tashlanmagan — ya'ni modelning o'zi javob berishdan bosh
+tortgan (kontekstda javob yo'q deb hisoblagan). To'lgan bo'lsa — model javob
+yozgan, lekin ko'chirgan parchasi manbada topilmagan.
 
 ### `status` qiymatlarining ma'nosi
 
@@ -401,20 +502,20 @@ tekshirish mumkin:
 # 401 — kalit yo'q
 curl -i -X POST http://localhost:8000/v1/rag/batch \
   -H "Content-Type: application/json" \
-  -d '{"batch_id":"x","items":[{"id":"q1","question":"test savol"}]}'
+  -d '{"run_id":"r","batch_id":"x","batch_index":1,"total_batches":1,"items":[{"id":"q1","question":"test savol"}]}'
 
 # 403 — kalit noto'g'ri
 curl -i -X POST http://localhost:8000/v1/rag/batch \
   -H "Authorization: Bearer notogri-kalit" \
   -H "Content-Type: application/json" \
-  -d '{"batch_id":"x","items":[{"id":"q1","question":"test savol"}]}'
+  -d '{"run_id":"r","batch_id":"x","batch_index":1,"total_batches":1,"items":[{"id":"q1","question":"test savol"}]}'
 
 # 409 — bir xil batch_id, boshqa savollar
 # (avval test-001 ni yuborgan bo'lsangiz)
 curl -i -X POST http://localhost:8000/v1/rag/batch \
   -H "Authorization: Bearer test-key-lex-2026" \
   -H "Content-Type: application/json" \
-  -d '{"batch_id":"test-001","items":[{"id":"z9","question":"butunlay boshqa savol"}]}'
+  -d '{"run_id":"test-run","batch_id":"test-001","batch_index":1,"total_batches":1,"items":[{"id":"z9","question":"butunlay boshqa savol"}]}'
 ```
 
 ### Idempotentlik
@@ -798,7 +899,7 @@ docker compose exec api python -m pytest tests/ -q            # → 86 passed
 curl -X POST http://localhost:8000/v1/rag/batch \
   -H "Authorization: Bearer test-key-lex-2026" \
   -H "Content-Type: application/json" \
-  -d '{"batch_id":"t1","items":[{"id":"q1","question":"Yillik taʼtil necha kun?"}]}'
+  -d '{"run_id":"r1","batch_id":"t1","batch_index":1,"total_batches":1,"items":[{"id":"q1","question":"Yillik taʼtil necha kun?"}]}'
 
 # 4. 100 savollik baholash
 docker compose exec api python scripts/run_eval.py   --run-id r1

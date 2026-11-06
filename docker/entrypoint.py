@@ -50,10 +50,24 @@ def wait_for_qdrant():
 
 
 def count_articles(client) -> int:
-    """How many points the served collection holds. Missing collection -> 0."""
+    """
+    How many *article-level* points the served collection holds.
+
+    Counted with the same source filter retrieval uses, not as a bare total:
+    the collection can also hold raw scraped chunks, which /v1 excludes because
+    they carry no article structure. Counting those too would let a half-built
+    index pass this check -- 7000 articles plus 400 raw chunks looks complete
+    and answers 400 questions' worth of nothing.
+    """
     collection = os.getenv("QDRANT_COLLECTION", "lex_uz")
     try:
-        return client.count(collection_name=collection, exact=True).count
+        from backend.retrieval import _corpus_filter
+
+        return client.count(
+            collection_name=collection,
+            count_filter=_corpus_filter(),
+            exact=True,
+        ).count
     except Exception:                     # noqa: BLE001 -- not created yet
         return 0
 
