@@ -113,10 +113,16 @@ you prefer real curl, call `curl.exe` explicitly.
 python ingest/ingest_corpus.py
 ```
 
-Takes 10–25 minutes on CPU the first time: it downloads the embedding model
-(~1.1 GB) and embeds 7383 articles. It is resumable — if you interrupt it, run
-it again and it picks up where it stopped. Skip this if the collection already
-has points (the next step tells you).
+Budget an hour or more on CPU the first time: it downloads the embedding model
+(~1.1 GB) and embeds 7383 articles. Measured on the development machine at
+~690 ms per article, so about 85 minutes — and that run shared the CPU with a
+server, so an idle machine should be faster. A GPU would cut this to a few
+minutes; it is the one place in the project where a GPU earns anything, and it
+happens once.
+
+It is resumable — if you interrupt it, run it again and it picks up where it
+stopped. Skip this if the collection already has points (the next step tells
+you).
 
 ---
 
