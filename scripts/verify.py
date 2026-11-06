@@ -210,7 +210,7 @@ def step_provider(report: Report) -> str:
         details.append("offline generator: no credential needed, and no real answers")
         details.append("it cannot judge no_answer and cannot honour answer_language")
         details.append("fix: put any provider key in .env -- with RAG_LLM_BACKEND=auto")
-        details.append("     the key itself picks the provider. See TESTING.md.")
+        details.append("     the key itself picks the provider. See README.md.")
         return report.add("Generation", SKIP, details)
 
     question = RETRIEVAL_CHECKS[0][0]

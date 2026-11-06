@@ -23,7 +23,6 @@ Hujjat ikki xil tekshiruvni ko'rsatadi:
 Agar vaqt kam bo'lsa, 1-2-3-bo'limlar yetarli.
 
 Texnik tafsilotlar (arxitektura, algoritm, texnologiya tanlovi) — `README.md`.
-Platformaga xos batafsil yo'riqnoma (Windows / macOS / Linux) — `TESTING.md`.
 
 ---
 
@@ -73,9 +72,27 @@ shuning uchun tizim ko'rmagan manbaga havola **chiqishi mumkin emas**.
 
 Faqat **Docker**. Python, kutubxonalar, vektor baza — hammasi konteyner ichida.
 
-- Docker Desktop (Windows / macOS) yoki Docker Engine (Linux)
-- ~6 GB disk (image + embedding modeli + indeks)
-- LLM provayder kaliti — **ixtiyoriy**, 9-bo'limga qarang
+| | Minimum | Izoh |
+|---|---|---|
+| Docker | yaqin versiya | Windows/macOS: Docker Desktop (ishga tushirilgan bo'lishi kerak) · Linux: Docker Engine |
+| RAM | 4 GB bo'sh | embedding modeli CPU'da ishlaydi |
+| Disk | ~6 GB bo'sh | image ~3 GB + model ~1.1 GB + indeks |
+| Internet | bir marta, setup'da | paketlar va model yuklanadi; keyin API'ning o'ziga internet kerak emas (faqat LLM provayderga chiqish uchun) |
+| GPU | **kerak emas** | hammasi CPU'da |
+| LLM kaliti | **ixtiyoriy** | 9-bo'limga qarang; kalitsiz ham to'liq ishlaydi |
+
+Windows'da Docker Desktop **WSL2 backend** bilan o'rnatilishi kerak.
+
+**Korpus repo bilan birga keladi** (`data/corpus/.../data/articles/`, ~12 MB,
+CC0) — alohida yuklab olish kerak emas. Va uni **yangi nusxa bilan
+almashtirmang**: versiya ataylab qotirilgan, aks holda indeks jimgina
+o'zgarib ballaringiz bizning natijalar bilan taqqoslanmay qoladi.
+
+`requirements-scraper.txt` **kerak emas** — u faqat lex.uz skraperi va
+`orchestration/` dagi kunlik Airflow ishi uchun, ular bu qo'llanmada
+ishlatilmaydi va ~400 MB brauzer tortadi. O'sha ish alohida Qdrant
+kolleksiyasiga (`lex_uz_raw`) yozadi, ya'ni siz tekshirayotgan narsaga
+ta'sir qila olmaydi.
 
 ### Bitta buyruq
 
@@ -158,13 +175,28 @@ python ingest/ingest_corpus.py     # bir marta, ~85 daqiqa
 uvicorn backend.main:app --port 8000
 ```
 
-> **Windows uchun.** PowerShell'da konsolni UTF-8 ga o'tkazish kerak, aks holda
-> `oʻ` va `gʻ` harflari buzilib ko'rinadi:
-> ```powershell
-> [Console]::OutputEncoding = [Text.Encoding]::UTF8
-> $env:PYTHONUTF8 = "1"
-> ```
-> To'liq yo'riqnoma — `TESTING.md`. Docker bilan bu kerak emas.
+#### Windows (PowerShell) uchun uchta eslatma
+
+Bular **faqat Docker'siz** ishlatganda kerak.
+
+**1. Konsol kodlashi.** Har yangi PowerShell oynasida, hech narsa
+yurgizishdan oldin — aks holda `oʻ` va `gʻ` harflari `?` bo'lib chiqadi.
+Bu konsolning kodlashi, API'ning ma'lumoti emas:
+
+```powershell
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONUTF8 = "1"
+```
+
+**2. venv aktivatsiyasi bloklansa:**
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+**3. `curl` PowerShell'da boshqa narsa.** U `Invoke-WebRequest` ning
+taxallusi va `-d` ni **qabul qilmaydi**. Haqiqiy curl kerak bo'lsa,
+`curl.exe` deb aniq chaqiring.
 
 ---
 
