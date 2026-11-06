@@ -13,6 +13,10 @@ data/batches.sqlite3-shm
 # Saved eval runs: keep the ones you want to compare, don't commit every run
 data/runs/
 
+# PDFs stay local. The exported write-ups go stale the moment the code moves on,
+# and the write-up itself lives in README.md and TESTING.md.
+*.pdf
+
 # --- third-party corpus (github.com/javohirmat/uzbek-legal-corpus, CC0) ------
 # Only the two things /v1 reads are committed: the article JSONL files and the
 # manifest. They are pinned on purpose -- `index_version` claims snapshot

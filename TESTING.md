@@ -8,7 +8,8 @@ know what the thing *is*, read [README.md](README.md) instead.
 about Uzbekistan legislation, returning for each question an answer, the lex.uz
 sources (document + article), and the context chunks it retrieved. It is built
 to the specification in `RAG API — test spetsifikatsiyasi (lex.uz).pdf`, which is
-in this repo — the spec is the contract, this guide is how to check it.
+not committed here — ask the project owner for it. The spec is the contract,
+this guide is how to check it.
 
 **Read this first:** two things are *expected* to fail right now. Jump to
 [Known failures](#known-failures-do-not-report-these-as-bugs) before you file
@@ -688,5 +689,6 @@ python scripts/score_eval.py --run-id NAME            # the spec's metric table
 python scripts/list_models.py gemini --probe          # check a provider key
 ```
 
-The spec itself is `RAG API — test spetsifikatsiyasi (lex.uz).pdf` in this repo.
-Where this guide and the spec disagree, the spec wins — tell us.
+The spec itself is `RAG API — test spetsifikatsiyasi (lex.uz).pdf`, kept outside
+this repo; ask the project owner for a copy. Where this guide and the spec
+disagree, the spec wins — tell us.
