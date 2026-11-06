@@ -19,6 +19,7 @@ This lets the chatbot answer "which kodeks, which modda" precisely instead of ju
 Run: python ingest/ingest_corpus.py
 """
 import json
+import os
 from pathlib import Path
 
 from ingest.ingest import embed_texts, ensure_collection, qdrant_client, COLLECTION
@@ -73,7 +74,13 @@ def ingest_corpus():
     ensure_collection()
     client = qdrant_client()
 
-    progress_file = ROOT / "ingest" / "corpus_progress.json"
+    # Overridable so a container can keep it on a volume: the file is what makes
+    # an interrupted 85-minute build resume instead of starting over, and
+    # anything written inside the image is gone when the container is replaced.
+    progress_file = Path(
+        os.getenv("INGEST_PROGRESS_FILE", str(ROOT / "ingest" / "corpus_progress.json"))
+    )
+    progress_file.parent.mkdir(parents=True, exist_ok=True)
     done_seen = set()
     if progress_file.exists():
         done_seen = set(json.loads(progress_file.read_text()))

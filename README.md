@@ -71,11 +71,51 @@ and defaults to `test-key-lex-2026`. Responses are
 
 ## Setup
 
-You need **Python 3.11+** and **Docker** (for Qdrant, the vector store).
-Everything else installs with pip. The instructions below differ only in shell
-syntax — the code is identical on all three platforms.
+### One command
 
-### Linux
+```bash
+docker compose up
+```
+
+That is the whole setup, on every platform. Qdrant starts, the api container
+waits for it to be healthy, builds the index if the collection is missing, and
+then serves on `http://localhost:8000` with the test key
+`test-key-lex-2026`. No `.env` is required: the compose defaults answer with
+the offline generator, which needs no credential. Copy `.env.example` to `.env`
+only to point generation at a provider of your own.
+
+Two of those steps are slow, and both happen once:
+
+| Step | Cost | Kept in |
+|---|---|---|
+| Build the image | ~5 min | Docker image cache |
+| Download `multilingual-e5-base` | ~1.1 GB | `hf_models` volume |
+| Embed 7383 articles | ~85 min on CPU | `qdrant_storage` volume |
+
+So the first `docker compose up` takes about an hour and a half and every later
+one takes seconds. The index build streams progress every 64 articles and
+resumes rather than restarting if it is interrupted — the progress file lives on
+the `app_state` volume for exactly that reason. `docker compose down` keeps all
+three volumes; `down -v` is what discards them.
+
+Scripts run inside the container:
+
+```bash
+docker compose exec api python scripts/verify.py --quick
+docker compose exec api python -m pytest tests/ -q
+docker compose exec api python scripts/run_eval.py --run-id r1
+```
+
+`data/eval/` and `data/runs/` are bind-mounted, so the test set you edit on the
+host is the one the container reads, and run output lands on the host.
+
+### Without Docker
+
+Useful if you want to work on the code rather than just run it. You need
+**Python 3.11+** and **Docker** (for Qdrant alone). The instructions below
+differ only in shell syntax — the code is identical on all three platforms.
+
+#### Linux
 
 ```bash
 git clone <repo> && cd "chatbot vibe"
@@ -96,7 +136,7 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 ```
 
-### macOS
+#### macOS
 
 Same as Linux. Install the prerequisites with Homebrew and use Docker Desktop:
 
@@ -117,7 +157,7 @@ On Apple Silicon the embedding model runs on the CPU via PyTorch's default
 build — no extra setup. The first run downloads `multilingual-e5-base`
 (~1.1 GB) into `~/.cache/huggingface`, which takes a few minutes once.
 
-### Windows
+#### Windows
 
 Use PowerShell. Install Python from python.org (tick **Add python.exe to PATH**)
 and Docker Desktop with the WSL2 backend.
