@@ -1,7 +1,19 @@
-# O'qituvchi uchun — API'ni qanday test qilish
+# Test qo'llanmasi — API'ni qanday tekshirish
 
-Bu hujjat bitta savolga javob beradi: **spetsifikatsiyada talab qilingan narsalarni
-qanday tekshirish mumkin.**
+**Spetsifikatsiyada so'ralgan API tayyor va topshirilgan.** Barcha majburiy
+endpointlar, barcha status kodlari, 100 savollik baholash mexanizmi va
+avtomat testlar ishlaydi. Bu hujjat ularni qanday tekshirishni ko'rsatadi.
+
+Ishga tushirish uchun **bitta buyruq** yetarli:
+
+```bash
+docker compose up
+```
+
+Keyin API shu manzilda ochiladi: **`http://localhost:8000`**
+Test kaliti: **`test-key-lex-2026`**
+
+Tafsilotlar 2-bo'limda.
 
 Hujjat ikki xil tekshiruvni ko'rsatadi:
 
@@ -59,36 +71,92 @@ shuning uchun tizim ko'rmagan manbaga havola **chiqishi mumkin emas**.
 
 ### Kerakli narsalar
 
-- Python 3.11+
-- Docker (Qdrant uchun)
-- ~2 GB disk (embedding modeli)
+Faqat **Docker**. Python, kutubxonalar, vektor baza — hammasi konteyner ichida.
+
+- Docker Desktop (Windows / macOS) yoki Docker Engine (Linux)
+- ~6 GB disk (image + embedding modeli + indeks)
 - LLM provayder kaliti — **ixtiyoriy**, 9-bo'limga qarang
 
-### Buyruqlar
+### Bitta buyruq
 
 ```bash
-# 1. sozlama fayli
-cp .env.example .env
+docker compose up
+```
 
-# 2. Python muhiti
+Shu buyruq ketma-ket quyidagilarni bajaradi:
+
+| # | Nima bo'ladi | Vaqt |
+|---|---|---|
+| 1 | Qdrant (vektor baza) ko'tariladi | ~10 sekund |
+| 2 | API image quriladi | ~5 daqiqa, **birinchi marta** |
+| 3 | Embedding modeli yuklanadi (~1.1 GB) | ~2 daqiqa, **birinchi marta** |
+| 4 | 7 383 modda indekslanadi | **~85 daqiqa, bir marta** |
+| 5 | API `http://localhost:8000` da ochiladi | — |
+
+Tayyor bo'lganda logda shu chiqadi:
+
+```
+[entrypoint] Index ready: 7383 articles.
+[entrypoint] Starting the API on port 8000. Health: GET /v1/health
+```
+
+**Ikkinchi marta `docker compose up` — bir necha sekund.** Indeks ham, model
+ham Docker volume'larida saqlanadi, ya'ni 2-4 qadamlar qaytarilmaydi.
+`docker compose down` ham ularni o'chirmaydi.
+
+> **4-qadam haqida — eng uzun qadam.** 7 383 moddani vektorga aylantirish
+> CPU'da ~85 daqiqa oladi (o'lchangan: ~690 ms har modda). Log har 64 moddada
+> yangilanadi, ya'ni ish ketayotgani ko'rinadi. Uzilsa qo'rqmang — dastur
+> qayerga yetganini volume'ga yozib boradi va qayta ko'tarilganda **qoldirgan
+> joydan** davom etadi, boshidan emas.
+>
+> Shoshilinch bo'lsa, boshqa terminalda jarayonni kuzatish mumkin:
+> ```bash
+> docker compose logs -f api
+> ```
+
+### Foydali buyruqlar
+
+```bash
+docker compose up -d          # fonda ko'tarish
+docker compose logs -f api    # loglarni kuzatish
+docker compose ps             # holat (healthy bo'lishi kerak)
+docker compose down           # to'xtatish (indeks saqlanadi)
+docker compose down -v        # to'xtatish + indeksni ham o'chirish
+```
+
+### Sozlamalar
+
+Hech narsa sozlamasa ham ishlaydi. O'z LLM kalitingizni qo'yish uchun:
+
+```bash
+cp .env.example .env          # keyin .env ni tahrirlang
+docker compose up             # .env avtomat o'qiladi
+```
+
+`.env` dagi muhim qiymatlar:
+
+```
+RAG_API_KEYS=test-key-lex-2026     # test kaliti
+RAG_LLM_BACKEND=offline            # provayder (9-bo'limga qarang)
+RAG_SYNC_DEADLINE_S=120            # bundan oshsa 202 qaytadi
+RAG_RATE_LIMIT_INTERVAL_S=1.0      # sekundda bitta batch
+RAG_RESULT_RETENTION_DAYS=30       # natijalar necha kun saqlanadi
+```
+
+### Docker'siz ishlatish (ixtiyoriy)
+
+Agar Python muhitida ishlatmoqchi bo'lsangiz:
+
+```bash
+cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-# 3. vektor bazasi
-docker compose up -d
-
-# 4. indeks qurish — BIR MARTA, ~85 daqiqa CPU'da
-python ingest/ingest_corpus.py
-
-# 5. server
+docker compose up -d qdrant        # faqat vektor baza
+python ingest/ingest_corpus.py     # bir marta, ~85 daqiqa
 uvicorn backend.main:app --port 8000
 ```
-
-> **4-qadam haqida.** 7 383 moddani vektorga aylantirish CPU'da ~85 daqiqa
-> oladi (o'lchangan: ~690 ms har modda). Uzilsa qo'rqmang — dastur qayerga
-> yetganini yozib boradi va qayta yurgizganda **qoldirgan joydan** davom etadi.
-> Bu ish **bir marta** bajariladi; keyin Qdrant diskda saqlanadi.
 
 > **Windows uchun.** PowerShell'da konsolni UTF-8 ga o'tkazish kerak, aks holda
 > `oʻ` va `gʻ` harflari buzilib ko'rinadi:
@@ -96,20 +164,7 @@ uvicorn backend.main:app --port 8000
 > [Console]::OutputEncoding = [Text.Encoding]::UTF8
 > $env:PYTHONUTF8 = "1"
 > ```
-> To'liq yo'riqnoma — `TESTING.md`.
-
-### Sozlamalar
-
-`.env` fayldagi muhim qiymatlar:
-
-```
-RAG_API_KEYS=test-key-lex-2026     # test kaliti
-RAG_LLM_BACKEND=offline            # provayder (9-bo'limga qarang)
-QDRANT_COLLECTION=lex_uz
-RAG_SYNC_DEADLINE_S=120            # bundan oshsa 202 qaytadi
-RAG_RATE_LIMIT_INTERVAL_S=1.0      # sekundda bitta batch
-RAG_RESULT_RETENTION_DAYS=30       # natijalar necha kun saqlanadi
-```
+> To'liq yo'riqnoma — `TESTING.md`. Docker bilan bu kerak emas.
 
 ---
 
@@ -119,7 +174,7 @@ Bitta buyruq hamma narsani tekshiradi: muhit, Qdrant ulanishi, indeks holati,
 uch tilda qidiruv, 86 kontrakt testi, provayder sozlamasi.
 
 ```bash
-python scripts/verify.py --quick
+docker compose exec api python scripts/verify.py --quick
 ```
 
 Kutilgan natija — oxirida:
@@ -128,14 +183,15 @@ Kutilgan natija — oxirida:
 VERDICT: READY
 ```
 
-Agar server ham ishlab turgan bo'lsa va 100 savollik baholashni ham
-yurgizmoqchi bo'lsangiz:
+Agar 100 savollik baholashni ham yurgizmoqchi bo'lsangiz (uzoq):
 
 ```bash
-python scripts/verify.py --base-url http://localhost:8000
+docker compose exec api python scripts/verify.py --base-url http://localhost:8000
 ```
 
-(`--quick` bo'lmasa, u 100 savolli baholashni ham bajaradi — bu uzoq.)
+> **Eslatma.** Hamma skript konteyner ichida yurgiziladi —
+> `docker compose exec api python ...`. Docker'siz ishlatayotgan bo'lsangiz,
+> `docker compose exec api` qismini tashlab, to'g'ridan `python ...` deng.
 
 ---
 
@@ -342,7 +398,7 @@ Shuning uchun so'rov uzilib qolsa, xuddi shu so'rovni qayta yuborish **xavfsiz**
 Spetsifikatsiya §7 checklist'i test sifatida yozilgan:
 
 ```bash
-python -m pytest tests/ -q
+docker compose exec api python -m pytest tests/ -q
 ```
 
 Kutilgan: `86 passed, 1 skipped`. Testlar offline generator bilan ishlaydi —
@@ -385,18 +441,19 @@ Bu ikki ustunni to'ldirsangiz, `score_eval.py` qolgan 3 metrikani ham hisoblaydi
 ### Yurgizish
 
 ```bash
-# server ishlab turgan holda, boshqa terminalda:
-python scripts/run_eval.py --run-id r1
+docker compose exec api python scripts/run_eval.py --run-id r1
 ```
 
-Natijalar `data/runs/r1/b01.json` ... `b10.json` ga yoziladi.
+Natijalar **host mashinada** `data/runs/r1/b01.json` ... `b10.json` ga
+yoziladi — ya'ni konteynerdan chiqarib olish kerak emas.
 
 Foydali flaglar:
 
 ```bash
-python scripts/run_eval.py --run-id r1 --batches b01,b02   # faqat ikki batch
-python scripts/run_eval.py --run-id r1 --top-k 10          # boshqa top_k
-python scripts/run_eval.py --run-id r1 --base-url http://localhost:8000
+# faqat ikki batch
+docker compose exec api python scripts/run_eval.py --run-id r1 --batches b01,b02
+# boshqa top_k
+docker compose exec api python scripts/run_eval.py --run-id r1 --top-k 10
 ```
 
 Uzilib qolsa — **xuddi shu buyruqni qayta yurgizing**, bajarilgan batch'lar
@@ -405,13 +462,13 @@ o'tkazib yuboriladi.
 ### Ballash
 
 ```bash
-python scripts/score_eval.py --run-id r1
+docker compose exec api python scripts/score_eval.py --run-id r1
 ```
 
 Hisobot terminalga chiqadi. JSON ko'rinishida ham saqlash mumkin:
 
 ```bash
-python scripts/score_eval.py --run-id r1 --json hisobot.json
+docker compose exec api python scripts/score_eval.py --run-id r1 --json hisobot.json
 ```
 
 Agar run to'liq bo'lmasa, hisobot tepasida `PARTIAL RUN` deb yoziladi va
@@ -498,10 +555,16 @@ Qo'llanadigan provayderlar:
 | Ollama, LM Studio (mahalliy) | `ollama`, `lmstudio` | kerak emas |
 | Boshqa OpenAI-mos servis | `custom` | `RAG_LLM_BASE_URL` + kalit |
 
+`.env` o'zgartirilgandan keyin konteynerni qayta ko'tarish kerak:
+
+```bash
+docker compose up -d --force-recreate api
+```
+
 Kalitni **oldin sinab ko'ring** — qaysi modellarga kira olishi hisobga bog'liq:
 
 ```bash
-python scripts/list_models.py anthropic --probe
+docker compose exec api python scripts/list_models.py anthropic --probe
 ```
 
 `--probe` bitta real savolga javob yozib ko'radi. Model nomini `.env` dagi
@@ -644,31 +707,43 @@ qilmaydi»* degan da'vo yo'q. *«Manbasiz javob bermaydi»* — bu o'lchangan.
 ### Birinchi qadam — har doim
 
 ```bash
-python scripts/verify.py --quick
+docker compose ps                  # ikkisi ham "healthy" bo'lishi kerak
+docker compose logs --tail 40 api  # entrypoint nima deganini ko'rish
+docker compose exec api python scripts/verify.py --quick
 ```
 
-U muammoni **qaysi qatlamda** ekanini aytadi: muhit, Qdrant, indeks, qidiruv,
-kontrakt yoki provayder.
+`verify.py` muammoni **qaysi qatlamda** ekanini aytadi: muhit, Qdrant, indeks,
+qidiruv, kontrakt yoki provayder.
 
 ### Tez-tez uchraydigan holatlar
 
 | Simptom | Sabab | Yechim |
 |---|---|---|
-| `INDEX_UNAVAILABLE` | Qdrant ishlamayapti | `docker compose up -d` |
-| Barcha savol `no_answer` | indeks bo'sh | `python ingest/ingest_corpus.py` |
+| `api` konteyneri `starting` da turibdi | indeks hali qurilyapti | `docker compose logs -f api` — kutish |
+| Barcha savol `no_answer` | indeks bo'sh yoki chala | loglarni ko'ring; `docker compose restart api` davom ettiradi |
+| `INDEX_UNAVAILABLE` | Qdrant ishlamayapti | `docker compose up -d qdrant` |
 | Barcha savol `LLM_ERROR` | kalit yo'q yoki kvota tugagan | `list_models.py <provayder> --probe` |
 | Birinchi savol juda sekin | model yuklanishi | normal; keyingilari ~0.24s |
-| `oʻ` / `gʻ` buzilib ko'rinadi | konsol kodlashi | Windows: UTF-8 (2-bo'lim) |
 | `429` | sekundda bir nechta batch | `Retry-After` ni kutish |
 | `409` | bir xil `batch_id`, boshqa savollar | yangi `batch_id` qo'ying |
+| `8000` porti band | boshqa dastur egallagan | `docker-compose.yml` da `"8001:8000"` qiling |
+| `oʻ` / `gʻ` buzilib ko'rinadi | konsol kodlashi | Docker'siz ishlatganda: Windows UTF-8 (2-bo'lim) |
+
+### Butunlay noldan boshlash
+
+```bash
+docker compose down -v        # indeks va model ham o'chadi
+docker compose up --build     # ~85 daqiqa qaytadan
+```
 
 ### Hisobot yuborish
 
 Muammo chiqsa, quyidagilar yetarli:
 
-1. `python scripts/verify.py --quick` chiqishi
-2. So'rov (`batch_id` bilan) va qaytgan javob
-3. `curl -H "Authorization: Bearer test-key-lex-2026" http://localhost:8000/v1/meta`
+1. `docker compose logs --tail 50 api` chiqishi
+2. `docker compose exec api python scripts/verify.py --quick` chiqishi
+3. So'rov (`batch_id` bilan) va qaytgan javob
+4. `curl -H "Authorization: Bearer test-key-lex-2026" http://localhost:8000/v1/meta`
 
 `/v1/meta` ichida `index_version` va `pipeline_version` bor — ular bilan
 qaysi holat sinalganini aniq tiklash mumkin.
@@ -678,11 +753,14 @@ qaysi holat sinalganini aniq tiklash mumkin.
 ## Qisqa xulosa
 
 ```bash
+# 0. ishga tushirish — bitta buyruq
+docker compose up                              # birinchi marta ~90 daqiqa
+
 # 1. tayyormi?
-python scripts/verify.py --quick               # → VERDICT: READY
+docker compose exec api python scripts/verify.py --quick      # → VERDICT: READY
 
 # 2. kontrakt to'g'rimi?
-python -m pytest tests/ -q                     # → 86 passed
+docker compose exec api python -m pytest tests/ -q            # → 86 passed
 
 # 3. qo'lda bitta so'rov
 curl -X POST http://localhost:8000/v1/rag/batch \
@@ -691,8 +769,8 @@ curl -X POST http://localhost:8000/v1/rag/batch \
   -d '{"batch_id":"t1","items":[{"id":"q1","question":"Yillik taʼtil necha kun?"}]}'
 
 # 4. 100 savollik baholash
-python scripts/run_eval.py   --run-id r1
-python scripts/score_eval.py --run-id r1
+docker compose exec api python scripts/run_eval.py   --run-id r1
+docker compose exec api python scripts/score_eval.py --run-id r1
 ```
 
 Spetsifikatsiya bilan ziddiyat topsangiz — **spetsifikatsiya ustun**, ayting,
