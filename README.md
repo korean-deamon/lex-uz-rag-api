@@ -295,7 +295,7 @@ one run.
 ## How the spec checklist (section 7) is met
 
 Every line is covered by a test in `tests/test_api_v1.py`. Run them with
-`pytest tests/ -q` — 77 pass, 1 is skipped unless a working provider key is set.
+`pytest tests/ -q` — 86 pass, 1 is skipped unless a working provider key is set.
 
 | Checklist line | How | Test |
 |---|---|---|

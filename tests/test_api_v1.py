@@ -693,6 +693,60 @@ def test_section_titles_were_recovered():
     assert retrieval._full_section("soliq_kodeksi", "") == ""
 
 
+@pytest.mark.parametrize("word,stem", [
+    # The two forms that caused measured misses.
+    ("toʻlovchilari", "toʻlovchi"),
+    ("saylovda", "saylov"),
+    ("yoshdan", "yosh"),
+    ("kodeksining", "kodeksi"),
+    # Already a stem, or too short to cut safely -- left alone.
+    ("soliq", "soliq"),
+    ("nikoh", "nikoh"),
+    ("oʻgʻrilik", "oʻgʻrilik"),
+])
+def test_uzbek_stemmer_strips_only_inflection(word, stem):
+    """Uzbek is agglutinative, so BM25 saw `toʻlovchilari` and `toʻlovchilar`
+    as unrelated words. Only case and possessive endings are stripped; a stem
+    is never cut below four characters."""
+    from backend import retrieval
+    assert retrieval.uz_stem(word) == stem
+
+
+def test_stemming_recovers_an_article_it_used_to_miss(client):
+    """Measured regression: the voting-age question returned no_answer because
+    retrieval never surfaced the article that answers it. The question says
+    "yoshdan", the article says "yoshga" -- no shared token before stemming."""
+    from backend import retrieval
+    contexts, _ = retrieval.retrieve(
+        "Saylov kodeksiga koʻra saylovda qatnashish huquqi necha yoshdan beriladi?", top_k=5
+    )
+    found = [c for c in contexts
+             if c.article_meta.code == "saylov_kodeksi" and c.article_meta.article_id == "4"]
+    assert found, [c.article for c in contexts]
+    assert "oʻn sakkiz" in found[0].text, "4-modda should state the age"
+
+
+def test_stemming_does_not_regress_the_hand_checked_questions(client):
+    """The five questions verified by reading the statutes must still come back
+    at rank 1 -- a stemmer that over-cuts would quietly trade these away."""
+    from backend import retrieval
+    cases = [
+        ("Yillik asosiy mehnat taʻtilining eng kam muddati qancha?", "mehnat_kodeksi", "217"),
+        ("Jinoyat kodeksiga koʻra oʻgʻirlik uchun javobgarlik qanday?", "jinoyat_kodeksi", "169"),
+        ("Жиноят кодексига кўра ўғрилик учун жавобгарлик қандай?", "jinoyat_kodeksi", "169"),
+        ("Какой общий срок исковой давности установлен Гражданским кодексом?",
+         "fuqarolik_kodeksi_1qism", "150"),
+        ("Oʻzbekiston Respublikasi Konstitutsiyasiga koʻra davlat tili qaysi til?",
+         "konstitutsiya", "4"),
+    ]
+    for question, code, article in cases:
+        contexts, _ = retrieval.retrieve(question, top_k=5)
+        top = contexts[0].article_meta
+        assert (top.code, top.article_id) == (code, article), (
+            f"{question[:40]!r} -> {[c.article for c in contexts]}"
+        )
+
+
 def test_vat_rate_article_is_retrieved_with_its_section(client):
     """The regression this guards: asked for the VAT rate, retrieval must put
     the VAT-section rate article first, and the context handed to the model must

@@ -134,7 +134,7 @@ python scripts/verify.py --quick
 
 This is the fastest way to know whether anything is wrong. It checks, in order:
 the environment, Qdrant, the article index, retrieval against five
-hand-verified questions in three languages, the full spec checklist (77 tests),
+hand-verified questions in three languages, the full spec checklist (86 tests),
 and the configured LLM provider — then prints one verdict.
 
 **Expected output right now** (with no provider key):
@@ -144,7 +144,7 @@ and the configured LLM provider — then prints one verdict.
 [PASS] Qdrant                     collection 'lex_uz': 7443 points
 [PASS] Article index              7383 articles loaded
 [PASS] Retrieval (3 languages)    5/5 at rank 1, 5/5 in top-5
-[PASS] Spec section 7 checklist   77 passed, 1 skipped
+[PASS] Spec section 7 checklist   86 passed, 1 skipped
 [SKIP] Generation                 RAG_LLM_BACKEND=offline
 
 5 passed, 0 warning(s), 0 failed, 1 skipped
@@ -679,7 +679,7 @@ python scripts/verify.py --base-url http://localhost:8000 > verify-report.txt 2>
 ```bash
 python scripts/verify.py --quick                      # is it ready?
 python scripts/verify.py --base-url http://localhost:8000   # + live server + full eval
-pytest tests/ -q                                      # the spec checklist (77 tests)
+pytest tests/ -q                                      # the spec checklist (86 tests)
 uvicorn backend.main:app --port 8000                  # run the server
 python ingest/ingest_corpus.py                        # build/repair the index
 python scripts/build_testset.py                       # regenerate the test set

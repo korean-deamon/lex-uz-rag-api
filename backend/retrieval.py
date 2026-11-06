@@ -217,6 +217,43 @@ def translit_cyrl_to_latn(token: str) -> str:
     return "".join(_CYRL_TO_LATN.get(ch, ch) for ch in token)
 
 
+# Uzbek is agglutinative, so the same word carries a different ending in the
+# question and in the statute. Two measured misses came from exactly this:
+#
+#   question "…soliq toʻlovchilari kimlar?"   article 461 title "Soliq toʻlovchilar"
+#   question "…necha yoshdan beriladi?"       article 4 text   "…oʻn sakkiz yoshga toʻlgan"
+#
+# BM25 compares tokens, so `toʻlovchilari` / `toʻlovchilar` and `yoshdan` /
+# `yoshga` shared nothing and the correct article scored almost zero -- in both
+# cases retrieval returned the *adjacent* article and the model, given nothing
+# that answered the question, correctly refused.
+#
+# Only case and possessive endings are stripped, longest first. Derivational
+# suffixes (-lik, -chi, -siz) are deliberately left alone: they change what a
+# word means, and conflating "soliq" with "soliqsiz" would be worse than the
+# miss this fixes. The stem is added *alongside* the original token rather than
+# replacing it, so an exact match still scores higher than a stem-only match.
+_UZ_SUFFIXES = (
+    "larининг", "larimizning", "laringizning",
+    "larining", "lariga", "laridan", "larida", "larini", "larimiz", "laringiz",
+    "lardan", "larga", "larda", "larni", "lari", "lar",
+    "imizning", "ingizning", "lerining",
+    "ning", "niki", "imiz", "ingiz",
+    "dagi", "dan", "da", "ga", "ka", "qa", "ni", "nu",
+    "si", "im", "ing", "iz",
+)
+_MIN_STEM = 4
+
+
+def uz_stem(token: str) -> str:
+    """Strip one inflectional ending. Conservative: never shortens below
+    _MIN_STEM characters, and only removes a single suffix."""
+    for suffix in _UZ_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= _MIN_STEM:
+            return token[: -len(suffix)]
+    return token
+
+
 def tokenize(text: str) -> list[str]:
     text = lang.normalise(text).lower()
     tokens = [t for t in _TOKEN.findall(text) if len(t) > 2 and t not in STOPWORDS]
@@ -224,6 +261,10 @@ def tokenize(text: str) -> list[str]:
     for t in tokens:
         expanded.append(t)
         expanded.extend(SYNONYMS.get(t, []))
+        stem = uz_stem(t)
+        if stem != t:
+            expanded.append(stem)
+            expanded.extend(SYNONYMS.get(stem, []))
         if _HAS_CYRILLIC.search(t):
             # Keep both forms: the Latin one matches the corpus, the original
             # still matches should Cyrillic text ever be indexed.
@@ -231,6 +272,9 @@ def tokenize(text: str) -> list[str]:
             if latin != t and latin not in STOPWORDS:
                 expanded.append(latin)
                 expanded.extend(SYNONYMS.get(latin, []))
+                latin_stem = uz_stem(latin)
+                if latin_stem != latin:
+                    expanded.append(latin_stem)
     return expanded
 
 
